@@ -8,16 +8,130 @@
 #include"grid_functions.h"
 
 #define COLD
+class OneField
+{
+public:
+  double av;
+  double med;
+  double lo;
+  double hi;
+  bool dweight;
+  void Print(){
+    if (dweight) {
+      printf(" %e %e %e %e",av, med, lo, hi);
+    } else {
+      printf(" %e %e %e %e",av, med, lo, hi);
+    }
+  }
+
+};
+
+
+
 int compare(const void *a, const void *b) {
   if (*(double*)a > *(double*)b) return 1;
   else if (*(double*)a < *(double*)b) return -1;
-  else return 0; 
+  else return 0;
 }
 
 
+void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * displs,
+	       int bin_count, int rank, bool dweighted, double n_av, double * field_array) {
+    // velocity
+    MPI_Gatherv(field_array, cell_count_bb, MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    if (rank != 0) {
+      return;
+    }
+
+    qsort(big_array, bin_count, sizeof(double), compare);
+    double av = gsl_stats_mean(big_array, 1, bin_count);
+    double med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
+    double lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
+    double hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
+    if (dweighted) {
+      av /= n_av;
+      med /= n_av;
+      lo /= n_av;
+      hi /= n_av;
+    }
+    printf(" %e %e %e %e",av,med,lo,hi);
+    return;
+}
+
+
+
+
+
+
 int main(int argc, char *argv[]) {
-  int np_x, np_y, np_z;
+  int np_x, np_y, np_z; 
+  bool dweighted = true;
+  bool mask_hot = true;
+
+ 
   setbuf(stdout, NULL);
+
+  np_x = 1;
+  np_y = 1;
+  np_z = 1;
+
+  if (argc < 2){
+    printf("Options: np_x np_y np_z dweight vweight hot cold\n");
+    printf("Add filename as arg (exit) \n");
+    exit(-1);
+  }
+  
+  for (int i=2; i<argc; i++) {
+    if (strcmp(argv[i],"np_x") == 0) {
+      if ((i+1) < argc) {
+	np_x = atoi(argv[i+1]);
+      }
+    }
+
+    if (strcmp(argv[i],"np_y") == 0) {
+      if ((i+1) < argc) {
+	np_y = atoi(argv[i+1]);
+      }
+    }    
+
+    if (strcmp(argv[i],"np_z") == 0) {
+      if ((i+1) < argc) {
+	np_z = atoi(argv[i+1]);
+      }
+    }
+
+    if (strcmp(argv[i],"dweight") == 0) {
+      dweighted = true;
+    }
+    
+    if (strcmp(argv[i],"vweight") == 0) {
+      dweighted = false;
+    }
+
+    if (strcmp(argv[i],"hot") == 0) {
+      mask_hot = true;
+    }
+
+    if (strcmp(argv[i],"cold") == 0) {
+      mask_hot = false;
+    } 
+  }
+
+  char const * hot_or_cold;
+  char const * den_or_vol;
+  if (mask_hot) {
+    hot_or_cold = "hot";
+  } else {
+    hot_or_cold = "cold";
+  }
+
+  if (dweighted) {
+    den_or_vol = "den";
+  } else {
+    den_or_vol = "vol";    
+  }
+  
+  /*
   if (argc < 2){
     printf("Add filename as arg (exit) \n");
     exit(-1);
@@ -36,8 +150,10 @@ int main(int argc, char *argv[]) {
   } else {
     np_z = atoi(argv[3]);
   }
-  printf("Filename: %s np_x: %i np_z: %i\n",argv[1],np_x,np_z);
+  */
   
+  printf("Filename: %s np_x: %i np_z: %i Mask: %s Weighting: %s \n",argv[1],np_x,np_z, hot_or_cold, den_or_vol);
+
   // mpi stuff
   int rank, size;
   MPI_Init(&argc, &argv);
@@ -60,6 +176,7 @@ int main(int argc, char *argv[]) {
   double cone = 30.;
   double r_av;
   double n_av, n_med, n_lo, n_hi;
+  /*
   double v_av, v_med, v_lo, v_hi;
   double T_av, T_med, T_lo, T_hi;
   double P_av, P_med, P_lo, P_hi;
@@ -67,7 +184,7 @@ int main(int argc, char *argv[]) {
   double c_av, c_med, c_lo, c_hi;
   double cs_av, cs_med, cs_lo, cs_hi;
   double M_av, M_med, M_lo, M_hi;
-
+  */
   // some constants
   double l_s = 3.086e21; // length scale, centimeters in a kiloparsec
   double m_s = 1.99e33; // mass scale, g in a solar mass
@@ -85,6 +202,9 @@ int main(int argc, char *argv[]) {
 
   double Tcold = 2e4;
   double Thot = 5e5;
+
+
+  
   // Random number generator
   //Ran quickran(0);
   //double prob;
@@ -123,11 +243,6 @@ int main(int argc, char *argv[]) {
     y_off = iy[rank]*ny;
     z_off = iz[rank]*nz;
   }
-  #ifdef HOT
-  printf("HOT \n");
-  #else
-  printf("COLD \n");
-  #endif
 
   free(ix);
   free(iy);
@@ -157,7 +272,7 @@ int main(int argc, char *argv[]) {
     r_bins[i] = 0;
   }
 
-  // Loop over cells and count cells in each radial bin 
+  // Loop over cells and count cells in each radial bin
   for (int i=0; i<nx; i++) {
     for (int j=0; j<ny; j++) {
       for (int k=0; k<nz; k++) {
@@ -173,11 +288,8 @@ int main(int argc, char *argv[]) {
           if (phi < cone*3.1416/180.) {
             n  = C.d[id]*d_s / (mu*mp);
             T  = C.gE[id]*(gamma-1.0)*p_s/(n*KB);
-	    #ifdef HOT
-            if (T > Thot) {
-	    #else
-            if (T < Tcold) {	      
-	    #endif
+	    
+	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
               r_bins[bin]++; // add one to this radial bin count
             }
           }
@@ -243,29 +355,39 @@ int main(int argc, char *argv[]) {
             P  = n*T;
             d  = d*d_s;
             S  = P * KB * pow(n, -gamma);
-	    #ifdef HOT
-            if (T > Thot) {
-	    #else
-            if (T < Tcold) {	      
-	    #endif	    
-              r_array[bin][cell_count[bin]] = r*n;
-              n_array[bin][cell_count[bin]] = n;
-              v_array[bin][cell_count[bin]] = vr*n;
-              T_array[bin][cell_count[bin]] = T*n;
-              P_array[bin][cell_count[bin]] = P*n;
-              S_array[bin][cell_count[bin]] = S*n;
-	      #ifdef SCALAR
-              c_array[bin][cell_count[bin]] = c*n;
-	      #endif
-              cs_array[bin][cell_count[bin]] = cs*n;
-              M_array[bin][cell_count[bin]] = M*n;
+	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {	    
+	      if (dweighted) {
+		r_array[bin][cell_count[bin]] = r*n;
+		n_array[bin][cell_count[bin]] = n;
+		v_array[bin][cell_count[bin]] = vr*n;
+		T_array[bin][cell_count[bin]] = T*n;
+		P_array[bin][cell_count[bin]] = P*n;
+		S_array[bin][cell_count[bin]] = S*n;
+                #ifdef SCALAR
+		c_array[bin][cell_count[bin]] = c*n;
+                #endif
+		cs_array[bin][cell_count[bin]] = cs*n;
+		M_array[bin][cell_count[bin]] = M*n;		
+	      } else {
+		r_array[bin][cell_count[bin]] = r;
+		n_array[bin][cell_count[bin]] = n;
+		v_array[bin][cell_count[bin]] = vr;
+		T_array[bin][cell_count[bin]] = T;
+		P_array[bin][cell_count[bin]] = P;
+		S_array[bin][cell_count[bin]] = S;
+                #ifdef SCALAR
+		c_array[bin][cell_count[bin]] = c;
+                #endif
+		cs_array[bin][cell_count[bin]] = cs;
+		M_array[bin][cell_count[bin]] = M;		
+	      }
               cell_count[bin]++;
             }
           }
         }
       }
     }
-  } 
+  }
 
   // free the grid arrays (now just have info in radial bins)
   free(C.d);
@@ -306,14 +428,14 @@ int main(int argc, char *argv[]) {
         printf("Error allocating big array.\n");
       }
     }
-    // radius 
-    MPI_Gatherv(r_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
+    // radius
+    MPI_Gatherv(r_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
       qsort(big_array, bin_count, sizeof(double), compare);
       r_av = gsl_stats_mean(big_array, 1, bin_count);
     }
     // density
-    MPI_Gatherv(n_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
+    MPI_Gatherv(n_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
       qsort(big_array, bin_count, sizeof(double), compare);
       n_av = gsl_stats_mean(big_array, 1, bin_count);
@@ -321,73 +443,30 @@ int main(int argc, char *argv[]) {
       n_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
       n_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
     }
-    // velocity
-    MPI_Gatherv(v_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      v_av = gsl_stats_mean(big_array, 1, bin_count);
-      v_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      v_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      v_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // temperature 
-    MPI_Gatherv(T_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      T_av = gsl_stats_mean(big_array, 1, bin_count);
-      T_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      T_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      T_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // pressure
-    MPI_Gatherv(P_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      P_av = gsl_stats_mean(big_array, 1, bin_count);
-      P_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      P_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      P_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // entropy
-    MPI_Gatherv(S_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      S_av = gsl_stats_mean(big_array, 1, bin_count);
-      S_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      S_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      S_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // color
-    MPI_Gatherv(c_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      c_av = gsl_stats_mean(big_array, 1, bin_count);
-      c_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      c_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      c_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // sound speed
-    MPI_Gatherv(cs_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      cs_av = gsl_stats_mean(big_array, 1, bin_count);
-      cs_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      cs_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      cs_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    // Mach number
-    MPI_Gatherv(M_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); 
-    if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      M_av = gsl_stats_mean(big_array, 1, bin_count);
-      M_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      M_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      M_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
 
     if (rank == 0) {
+      printf("%ld %e %e %e %e %e",
+	     bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
+    }
+    
+    // velocity
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, v_array[bb]);
+    // temperature
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, T_array[bb]);
+    // pressure
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, P_array[bb]);
+    // entropy
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, S_array[bb]);
+    // color
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, c_array[bb]);
+    // sound speed
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, cs_array[bb]);
+    // Mach number
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, M_array[bb]);    
+    if (rank == 0) {
+      printf("\n");
       //printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av, n_av, n_med, n_lo, n_hi, v_av, v_med, v_lo, v_hi, T_av, T_med, T_lo, T_hi, P_av, P_med, P_lo, P_hi, c_av, c_med, c_lo, c_hi, cs_av, cs_med, cs_lo, cs_hi, S_av, S_med, S_lo, S_hi, M_av, M_med, M_lo, M_hi);
-      printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi, v_av/n_av, v_med/n_av, v_lo/n_av, v_hi/n_av, T_av/n_av, T_med/n_av, T_lo/n_av, T_hi/n_av, P_av/n_av, P_med/n_av, P_lo/n_av, P_hi/n_av, c_av/n_av, c_med/n_av, c_lo/n_av, c_hi/n_av, cs_av/n_av, cs_med/n_av, cs_lo/n_av, cs_hi/n_av, S_av/n_av, S_med/n_av, S_lo/n_av, S_hi/n_av, M_av/n_av, M_med/n_av, M_lo/n_av, M_hi/n_av);
+      //printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi, v_av/n_av, v_med/n_av, v_lo/n_av, v_hi/n_av, T_av/n_av, T_med/n_av, T_lo/n_av, T_hi/n_av, P_av/n_av, P_med/n_av, P_lo/n_av, P_hi/n_av, c_av/n_av, c_med/n_av, c_lo/n_av, c_hi/n_av, cs_av/n_av, cs_med/n_av, cs_lo/n_av, cs_hi/n_av, S_av/n_av, S_med/n_av, S_lo/n_av, S_hi/n_av, M_av/n_av, M_med/n_av, M_lo/n_av, M_hi/n_av);
     }
     if (rank == 0) {
       free(big_array);
@@ -416,5 +495,3 @@ int main(int argc, char *argv[]) {
   return 0;
 
 }
-
-

@@ -9,7 +9,7 @@ OBJS   = profiles.o grid_functions.o
 
 INCL   = -I./ -I$(OLCF_GSL_ROOT)/include/gsl/
 
-CFLAGS = $(OPTIONS)
+CFLAGS = $(OPTIONS) -g
 
 LIBS   = -lhdf5 -lgsl -lopenblas 
 

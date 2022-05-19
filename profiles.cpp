@@ -7,7 +7,7 @@
 #include<gsl_statistics_double.h>
 #include"grid_functions.h"
 
-#define COLD
+
 class OneField
 {
 public:
@@ -151,8 +151,9 @@ int main(int argc, char *argv[]) {
     np_z = atoi(argv[3]);
   }
   */
-  
-  printf("Filename: %s np_x: %i np_z: %i Mask: %s Weighting: %s \n",argv[1],np_x,np_z, hot_or_cold, den_or_vol);
+
+  // The # is so that Numpy automatically ignores it if reading it in
+  printf("# Filename: %s np_x: %i np_z: %i Mask: %s Weighting: %s \n",argv[1],np_x,np_z, hot_or_cold, den_or_vol);
 
   // mpi stuff
   int rank, size;

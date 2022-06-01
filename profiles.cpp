@@ -64,11 +64,13 @@ void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * di
 
 
 int main(int argc, char *argv[]) {
-  int np_x, np_y, np_z; 
+  int np_x, np_y, np_z;
   bool dweighted = true;
   bool mask_hot = true;
+  double x_len = 5.;
+  double y_len = 5.;
+  double z_len = 5.;
 
- 
   setbuf(stdout, NULL);
 
   np_x = 1;
@@ -80,7 +82,7 @@ int main(int argc, char *argv[]) {
     printf("Add filename as arg (exit) \n");
     exit(-1);
   }
-  
+
   for (int i=2; i<argc; i++) {
     if (strcmp(argv[i],"np_x") == 0) {
       if ((i+1) < argc) {
@@ -92,7 +94,7 @@ int main(int argc, char *argv[]) {
       if ((i+1) < argc) {
 	np_y = atoi(argv[i+1]);
       }
-    }    
+    }
 
     if (strcmp(argv[i],"np_z") == 0) {
       if ((i+1) < argc) {
@@ -100,10 +102,32 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    if (strcmp(argv[i],"x_len") == 0) {
+      if ((i+1) < argc) {
+	x_len = atof(argv[i+1]);
+      }
+    }
+
+    if (strcmp(argv[i],"y_len") == 0) {
+      if ((i+1) < argc) {
+	y_len = atof(argv[i+1]);
+      }
+    }
+
+    if (strcmp(argv[i],"z_len") == 0) {
+      if ((i+1) < argc) {
+	z_len = atof(argv[i+1]);
+      }
+    }
+
+
+
+
+
     if (strcmp(argv[i],"dweight") == 0) {
       dweighted = true;
     }
-    
+
     if (strcmp(argv[i],"vweight") == 0) {
       dweighted = false;
     }
@@ -114,7 +138,7 @@ int main(int argc, char *argv[]) {
 
     if (strcmp(argv[i],"cold") == 0) {
       mask_hot = false;
-    } 
+    }
   }
 
   char const * hot_or_cold;
@@ -128,9 +152,9 @@ int main(int argc, char *argv[]) {
   if (dweighted) {
     den_or_vol = "den";
   } else {
-    den_or_vol = "vol";    
+    den_or_vol = "vol";
   }
-  
+
   /*
   if (argc < 2){
     printf("Add filename as arg (exit) \n");
@@ -153,7 +177,7 @@ int main(int argc, char *argv[]) {
   */
 
   // The # is so that Numpy automatically ignores it if reading it in
-  printf("# Filename: %s np_x: %i np_z: %i Mask: %s Weighting: %s \n",argv[1],np_x,np_z, hot_or_cold, den_or_vol);
+  printf("# Filename: %s np_x: %i np_y: %i np_z: %i Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n",argv[1], np_x, np_y, np_z, hot_or_cold, den_or_vol,x_len,y_len,z_len);
 
   // mpi stuff
   int rank, size;
@@ -171,9 +195,6 @@ int main(int argc, char *argv[]) {
   double d, vx, vy, vz, n, T, P, S, c, cs, M;
   double x_pos, y_pos, z_pos, r, vr, phi;
   double dx;
-  double x_len = 5.;
-  double y_len = 5.;
-  double z_len = 5.;
   double cone = 30.;
   double r_av;
   double n_av, n_med, n_lo, n_hi;
@@ -205,7 +226,7 @@ int main(int argc, char *argv[]) {
   double Thot = 5e5;
 
 
-  
+
   // Random number generator
   //Ran quickran(0);
   //double prob;
@@ -289,7 +310,7 @@ int main(int argc, char *argv[]) {
           if (phi < cone*3.1416/180.) {
             n  = C.d[id]*d_s / (mu*mp);
             T  = C.gE[id]*(gamma-1.0)*p_s/(n*KB);
-	    
+
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
               r_bins[bin]++; // add one to this radial bin count
             }
@@ -356,7 +377,7 @@ int main(int argc, char *argv[]) {
             P  = n*T;
             d  = d*d_s;
             S  = P * KB * pow(n, -gamma);
-	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {	    
+	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
 	      if (dweighted) {
 		r_array[bin][cell_count[bin]] = r*n;
 		n_array[bin][cell_count[bin]] = n;
@@ -368,7 +389,7 @@ int main(int argc, char *argv[]) {
 		c_array[bin][cell_count[bin]] = c*n;
                 #endif
 		cs_array[bin][cell_count[bin]] = cs*n;
-		M_array[bin][cell_count[bin]] = M*n;		
+		M_array[bin][cell_count[bin]] = M*n;
 	      } else {
 		r_array[bin][cell_count[bin]] = r;
 		n_array[bin][cell_count[bin]] = n;
@@ -380,7 +401,7 @@ int main(int argc, char *argv[]) {
 		c_array[bin][cell_count[bin]] = c;
                 #endif
 		cs_array[bin][cell_count[bin]] = cs;
-		M_array[bin][cell_count[bin]] = M;		
+		M_array[bin][cell_count[bin]] = M;
 	      }
               cell_count[bin]++;
             }
@@ -449,7 +470,7 @@ int main(int argc, char *argv[]) {
       printf("%ld %e %e %e %e %e",
 	     bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
     }
-    
+
     // velocity
     Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, v_array[bb]);
     // temperature
@@ -463,7 +484,7 @@ int main(int argc, char *argv[]) {
     // sound speed
     Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, cs_array[bb]);
     // Mach number
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, M_array[bb]);    
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, M_array[bb]);
     if (rank == 0) {
       printf("\n");
       //printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av, n_av, n_med, n_lo, n_hi, v_av, v_med, v_lo, v_hi, T_av, T_med, T_lo, T_hi, P_av, P_med, P_lo, P_hi, c_av, c_med, c_lo, c_hi, cs_av, cs_med, cs_lo, cs_hi, S_av, S_med, S_lo, S_hi, M_av, M_med, M_lo, M_hi);

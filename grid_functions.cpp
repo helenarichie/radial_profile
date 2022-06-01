@@ -33,11 +33,12 @@ void Read_Header(char *filename, int *nx, int *ny, int *nz, double *xlen, double
   /*
   attribute_id = H5Aopen(file_id, "domain", H5P_DEFAULT); 
   status = H5Aread(attribute_id, H5T_NATIVE_DOUBLE, &domain);
-  status = H5Aclose(attribute_id);
 
   *xlen = domain[0];
   *ylen = domain[1];
   *zlen = domain[2];
+
+  status = H5Aclose(attribute_id);  
   */
 }
 

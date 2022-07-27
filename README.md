@@ -4,6 +4,9 @@ Calculate radial profiles for [Cholla](https://github.com/cholla-hydro/cholla) s
 
 # Usage
 
+Make sure you have HDF5, GSL, MPI, and OpenBLAS libraries. 
+Edit Makefile as appropriate so that these libraries can be found. 
+
 Compile to get the executable 'profiles'
 
     make

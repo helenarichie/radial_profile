@@ -180,9 +180,13 @@ int main(int argc, char *argv[]) {
     // Read in some header info
     char filename[200];
     strcpy(filename, argv[1]);
-    char fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
-    strncat(filename, &fnum, 4);
-    Read_Header(filename, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
+    int fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
+    char fnum_str[20];
+    sprintf(fnum_str, "%d", fnum);
+    char filename_i[220];
+    sprintf(filename_i, "%s%s", filename, fnum_str);
+    printf("%s\n", filename_i);
+    Read_Header(filename_i, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
     dx = x_len / nx_local;
     dy = y_len / ny_local;
     dz = z_len / nz_local;
@@ -201,7 +205,7 @@ int main(int argc, char *argv[]) {
     #endif
 
     // Read in the grid data
-    Read_Grid(filename, C, nx_local, ny_local, nz_local);
+    Read_Grid(filename_i, C, nx_local, ny_local, nz_local);
 
     // Loop over cells and count cells in each radial bin
     for (int i=0; i<nx_local; i++) {

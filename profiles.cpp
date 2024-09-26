@@ -129,6 +129,9 @@ int main(int argc, char *argv[]) {
   double Tcold = 2e4;
   double Thot = 5e5;
 
+  double r_av;
+  double n_av, n_med, n_lo, n_hi;
+
   // Create arrays to hold cell values as a function of radius
   int N_bins = 80;
   long int r_bins[N_bins];
@@ -172,8 +175,6 @@ int main(int argc, char *argv[]) {
     double x_pos, y_pos, z_pos, r, vr, phi;
     double dx, dy, dz;
     double cone = 30.;
-    double r_av;
-    double n_av, n_med, n_lo, n_hi;
     int x_off, y_off, z_off;
 
     // Read in some header info

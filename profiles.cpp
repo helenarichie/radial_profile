@@ -64,18 +64,13 @@ void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * di
 
 
 int main(int argc, char *argv[]) {
-  int np_x, np_y, np_z;
   bool dweighted = true;
   bool mask_hot = true;
-  double x_len = 5.;
-  double y_len = 5.;
-  double z_len = 5.;
+  double x_len = 10.;
+  double y_len = 10.;
+  double z_len = 20.;
 
   setbuf(stdout, NULL);
-
-  np_x = 1;
-  np_y = 1;
-  np_z = 1;
 
   if (argc < 2){
     printf("Options: np_x np_y np_z dweight vweight hot cold\n");
@@ -84,58 +79,15 @@ int main(int argc, char *argv[]) {
   }
 
   for (int i=2; i<argc; i++) {
-    if (strcmp(argv[i],"np_x") == 0) {
-      if ((i+1) < argc) {
-	np_x = atoi(argv[i+1]);
-      }
-    }
-
-    if (strcmp(argv[i],"np_y") == 0) {
-      if ((i+1) < argc) {
-	np_y = atoi(argv[i+1]);
-      }
-    }
-
-    if (strcmp(argv[i],"np_z") == 0) {
-      if ((i+1) < argc) {
-	np_z = atoi(argv[i+1]);
-      }
-    }
-
-    if (strcmp(argv[i],"x_len") == 0) {
-      if ((i+1) < argc) {
-	x_len = atof(argv[i+1]);
-      }
-    }
-
-    if (strcmp(argv[i],"y_len") == 0) {
-      if ((i+1) < argc) {
-	y_len = atof(argv[i+1]);
-      }
-    }
-
-    if (strcmp(argv[i],"z_len") == 0) {
-      if ((i+1) < argc) {
-	z_len = atof(argv[i+1]);
-      }
-    }
-
-
-
-
-
     if (strcmp(argv[i],"dweight") == 0) {
       dweighted = true;
     }
-
     if (strcmp(argv[i],"vweight") == 0) {
       dweighted = false;
     }
-
     if (strcmp(argv[i],"hot") == 0) {
       mask_hot = true;
     }
-
     if (strcmp(argv[i],"cold") == 0) {
       mask_hot = false;
     }
@@ -148,36 +100,14 @@ int main(int argc, char *argv[]) {
   } else {
     hot_or_cold = "cold";
   }
-
   if (dweighted) {
     den_or_vol = "den";
   } else {
     den_or_vol = "vol";
   }
 
-  /*
-  if (argc < 2){
-    printf("Add filename as arg (exit) \n");
-    exit(-1);
-  }
-  if (argc < 3){
-    printf("Setting np_x = 1\n");
-    np_x = 1;
-  } else {
-    np_x = atoi(argv[2]);
-  }
-  np_y = np_x;
-  if (argc < 4){
-    printf("Setting np_z = 1\n");
-    np_z = 1;
-    printf("Usage: profiles filename np_x np_z \n");
-  } else {
-    np_z = atoi(argv[3]);
-  }
-  */
-
   // The # is so that Numpy automatically ignores it if reading it in
-  printf("# Filename: %s np_x: %i np_y: %i np_z: %i Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n",argv[1], np_x, np_y, np_z, hot_or_cold, den_or_vol,x_len,y_len,z_len);
+  printf("# Filename: %i Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n",argv[1], hot_or_cold, den_or_vol, x_len, y_len, z_len);
 
   // mpi stuff
   int rank, size;
@@ -185,28 +115,6 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  Conserved C;
-  int nx;
-  int ny;
-  int nz;
-  int x_off = 0;
-  int y_off = 0;
-  int z_off = 0;
-  double d, vx, vy, vz, n, T, P, S, c, cs, M;
-  double x_pos, y_pos, z_pos, r, vr, phi;
-  double dx;
-  double cone = 30.;
-  double r_av;
-  double n_av, n_med, n_lo, n_hi;
-  /*
-  double v_av, v_med, v_lo, v_hi;
-  double T_av, T_med, T_lo, T_hi;
-  double P_av, P_med, P_lo, P_hi;
-  double S_av, S_med, S_lo, S_hi;
-  double c_av, c_med, c_lo, c_hi;
-  double cs_av, cs_med, cs_lo, cs_hi;
-  double M_av, M_med, M_lo, M_hi;
-  */
   // some constants
   double l_s = 3.086e21; // length scale, centimeters in a kiloparsec
   double m_s = 1.99e33; // mass scale, g in a solar mass
@@ -225,83 +133,62 @@ int main(int argc, char *argv[]) {
   double Tcold = 2e4;
   double Thot = 5e5;
 
+  int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
+  int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
 
+  // each rank reads the files it's responsible for and sums their data into the radial bins
+  for (int f_i = 0; f_i < files_per_rank; f_i++) {
+    Conserved C;
+    int nx, ny, nz, nx_local, ny_local, nz_local;
+    double d, vx, vy, vz, n, T, P, S, c, cs, M;
+    double x_pos, y_pos, z_pos, r, vr, phi;
+    double dx, dy, dz;
+    double cone = 30.;
+    double r_av;
+    double n_av, n_med, n_lo, n_hi;
 
-  // Random number generator
-  //Ran quickran(0);
-  //double prob;
+    // Read in some header info
+    char filename[200];
+    strcpy(filename, argv[1]);
+    char fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
+    strncat(filename, &fnum, 4);
+    Read_Header(filename, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
+    dx = x_len / nx_local;
+    dy = y_len / ny_local;
+    dz = z_len / nz_local;
 
-  // Read in some header info
-  char filename[200];
-  //strcpy(filename, "./2048_new/hdf5/70.h5");
-  strcpy(filename, argv[1]);
-  Read_Header(filename, &nx, &ny, &nz, &x_len, &y_len, &z_len);
-  //printf("xyzlen %d %d %d",x_len,y_len,z_len);
-  //printf("Read_Header\n");
-  dx = x_len / nx;
+    // Allocate memory for the grid
+    C.d  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.mx = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.my = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.mz = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.E  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #ifdef DE
+    C.gE = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #endif
+    #ifdef SCALAR
+    C.c = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #endif
 
-  // set number of processes in each direction (for splitting)
-  nx = nx/np_x;
-  ny = ny/np_y;
-  nz = nz/np_z;
-  int *ix, *iy, *iz;
-  ix = (int *)malloc(size*sizeof(int));
-  iy = (int *)malloc(size*sizeof(int));
-  iz = (int *)malloc(size*sizeof(int));
-  // printf("malloc ix iy iz\n");
-  int np=0;
-  for(int i=0;i<np_x;i++) {
-    for(int j=0;j<np_y;j++) {
-      for(int k=0;k<np_z;k++) {
-        ix[np] = i;
-        iy[np] = j;
-        iz[np] = k;
-        np++;
-      }
+    // Read in the grid data
+    Read_Grid(filename, C, nx_local, ny_local, nz_local);
+
+    // Create arrays to hold cell values as a function of radius
+    int N_bins = 80;
+    long int r_bins[N_bins];
+    int bin;
+    for (int i=0; i<N_bins; i++) {
+      r_bins[i] = 0;
     }
-  }
-  for(int i=0; i<size; i++) {
-    x_off = ix[rank]*nx;
-    y_off = iy[rank]*ny;
-    z_off = iz[rank]*nz;
-  }
 
-  free(ix);
-  free(iy);
-  free(iz);
-
-  // Allocate memory for the grid
-  C.d  = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.mx = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.my = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.mz = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.E  = (double *) malloc(nz*ny*nx*sizeof(double));
-  #ifdef DE
-  C.gE = (double *) malloc(nz*ny*nx*sizeof(double));
-  #endif
-  #ifdef SCALAR
-  C.c = (double *) malloc(nz*ny*nx*sizeof(double));
-  #endif
-
-  // Read in the grid data
-  Read_Grid(filename, C, nx, ny, nz, x_off, y_off, z_off);
-
-  // Create arrays to hold cell values as a function of radius
-  int N_bins = 80;
-  long int r_bins[N_bins];
-  int bin;
-  for (int i=0; i<N_bins; i++) {
-    r_bins[i] = 0;
-  }
-
-  // Loop over cells and count cells in each radial bin
-  for (int i=0; i<nx; i++) {
-    for (int j=0; j<ny; j++) {
-      for (int k=0; k<nz; k++) {
-        int id = k + j*nz + i*nz*ny;
+    // Loop over cells and count cells in each radial bin
+    for (int i=0; i<nx_local; i++) {
+      for (int j=0; j<ny_local; j++) {
+        for (int k=0; k<nz_local; k++) {
+        int id = k + j*nz_local + i*nz_local*ny_local;
         x_pos = (0.5+i+x_off)*dx - x_len/2.;
-        y_pos = (0.5+j+y_off)*dx - y_len/2.;
-        z_pos = (0.5+k+z_off)*dx - z_len/2.;
+        y_pos = (0.5+j+y_off)*dy - y_len/2.;
+        z_pos = (0.5+k+z_off)*dz - z_len/2.;
         r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
         double rbin = 8*r;
         bin = int(rbin);
@@ -346,13 +233,13 @@ int main(int argc, char *argv[]) {
   }
 
   // Loop over cells and assign values to radial bins
-  for (int i=0; i<nx; i++) {
-    for (int j=0; j<ny; j++) {
-      for (int k=0; k<nz; k++) {
-        int id = k + j*nz + i*nz*ny;
+  for (int i=0; i<nx_local; i++) {
+    for (int j=0; j<ny_local; j++) {
+      for (int k=0; k<nz_local; k++) {
+        int id = k + j*nz_local + i*nz_local*ny_local;
         x_pos = (0.5+i+x_off)*dx - x_len/2.;
-        y_pos = (0.5+j+y_off)*dx - y_len/2.;
-        z_pos = (0.5+k+z_off)*dx - z_len/2.;
+        y_pos = (0.5+j+y_off)*dy - y_len/2.;
+        z_pos = (0.5+k+z_off)*dz - z_len/2.;
         r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
         double rbin = 8*r;
         bin = int(rbin);
@@ -425,6 +312,7 @@ int main(int argc, char *argv[]) {
   #endif
 
   MPI_Barrier(MPI_COMM_WORLD);
+  }
 
 
   // do analysis for each bin

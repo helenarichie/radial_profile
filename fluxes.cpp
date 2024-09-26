@@ -15,7 +15,6 @@ int compare(const void *a, const void *b) {
 }
 
 
-
 int main(int argc, char *argv[]) {
   
   if (argc < 2) {
@@ -28,16 +27,6 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  Conserved C;
-  int nx, ny, nz;
-  int x_off = 0;
-  int y_off = 0;
-  int z_off = 0;
-  double d, vx, vy, vz, n, T, P, E, gE, c; 
-  double x_pos, y_pos, z_pos, r, vr, phi;
-  double m_flux, p_flux, E_flux, E_flux_kin, E_flux_th, c_flux; 
-  double d_sum_hot, p_sum_hot, E_sum_hot, c_sum_hot, d_sum_ion, p_sum_ion, E_sum_ion, c_sum_ion, d_sum_cold, p_sum_cold, E_sum_cold, c_sum_cold, E_sum_th;
-  double dx;
   double x_len = 10.;
   double y_len = 10.;
   double z_len = 20.;
@@ -58,137 +47,118 @@ int main(int argc, char *argv[]) {
   double mu = 0.6;
   double gamma = 5./3.;
 
-  // Random number generator
-  //Ran quickran(0);
-  //double prob;
+  int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
+  int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
 
-  // Read in some header info
-  char filename[200];
-  strcpy(filename, argv[1]);
-  Read_Header(filename, &nx, &ny, &nz);
-  dx = x_len / nx;
+  // each rank reads the files it's responsible for and sums their data into the radial bins
+  for (int f_i = 0; f_i < files_per_rank; f_i++) {
+    Conserved C;
+    double d, vx, vy, vz, n, T, P, E, gE, c; 
+    double x_pos, y_pos, z_pos, r, vr, phi;
+    double m_flux, p_flux, E_flux, E_flux_kin, E_flux_th, c_flux; 
+    double d_sum_hot, p_sum_hot, E_sum_hot, c_sum_hot, d_sum_ion, p_sum_ion, E_sum_ion, c_sum_ion, d_sum_cold, p_sum_cold, E_sum_cold, c_sum_cold, E_sum_th;
+    double dx, dy, dz;
+    int nx, ny, nz, nx_local, ny_local, nz_local;
 
-  // set number of processes in each direction (for splitting)
-  int np_x, np_y, np_z;
-  np_x = np_y = 4;
-  np_z = 8;
-  nx = nx/np_x;
-  ny = ny/np_y;
-  nz = nz/np_z;
-  int *ix, *iy, *iz;
-  ix = (int *)malloc(size*sizeof(int));
-  iy = (int *)malloc(size*sizeof(int));
-  iz = (int *)malloc(size*sizeof(int));
-  int np=0;
-  for(int i=0;i<np_x;i++) {
-    for(int j=0;j<np_y;j++) {
-      for(int k=0;k<np_z;k++) {
-        ix[np] = i;
-        iy[np] = j;
-        iz[np] = k;
-        np++;
-      }
+    // Read in some header info
+    char filename[200];
+    strcpy(filename, argv[1]);
+    char fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
+    strncat(filename, &fnum, 4);
+    Read_Header(filename, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
+    dx = x_len / nx_local;
+    dy = y_len / ny_local;
+    dz = z_len / nz_local;
+
+    // Allocate memory for the grid
+    C.d  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.mx = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.my = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.mz = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.E  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #ifdef DE
+    C.gE = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #endif
+    #ifdef SCALAR
+    C.c = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    #endif
+
+    // Read in the grid data
+    Read_Grid(filename, C, nx_local, ny_local, nz_local);
+
+    // Create arrays to hold cell values as a function of radius
+    int N_bins = 80;
+    int bin;
+    double bin_width = 0.125;
+
+    double *d_array_hot = (double *)malloc(N_bins*sizeof(double));
+    double *d_array_ion = (double *)malloc(N_bins*sizeof(double));
+    double *d_array_cold = (double *)malloc(N_bins*sizeof(double));
+    double *p_array_hot = (double *)malloc(N_bins*sizeof(double));
+    double *p_array_ion = (double *)malloc(N_bins*sizeof(double));
+    double *p_array_cold = (double *)malloc(N_bins*sizeof(double));
+    double *E_array_hot = (double *)malloc(N_bins*sizeof(double));
+    double *E_array_ion = (double *)malloc(N_bins*sizeof(double));
+    double *E_array_cold = (double *)malloc(N_bins*sizeof(double));
+    double *c_array_hot = (double *)malloc(N_bins*sizeof(double));
+    double *c_array_ion = (double *)malloc(N_bins*sizeof(double));
+    double *c_array_cold = (double *)malloc(N_bins*sizeof(double));
+    double *E_array_th = (double *)malloc(N_bins*sizeof(double));
+    int cell_count_hot[N_bins];
+    int cell_count_ion[N_bins];
+    int cell_count_cold[N_bins];
+    // initialize data for each radial bin
+    for (int bb=0; bb<N_bins; bb++) {
+      d_array_hot[bb] = 0;
+      p_array_hot[bb] = 0;
+      E_array_hot[bb] = 0;
+      c_array_hot[bb] = 0;
+      d_array_ion[bb] = 0;
+      p_array_ion[bb] = 0;
+      E_array_ion[bb] = 0;
+      c_array_ion[bb] = 0;
+      d_array_cold[bb] = 0;
+      p_array_cold[bb] = 0;
+      E_array_cold[bb] = 0;
+      c_array_cold[bb] = 0;
+      E_array_th[bb] = 0;
+      cell_count_hot[bb] = 0;
+      cell_count_ion[bb] = 0;
+      cell_count_cold[bb] = 0;
     }
-  }
-  for(int i=0; i<size; i++) {
-    x_off = ix[rank]*nx;
-    y_off = iy[rank]*ny;
-    z_off = iz[rank]*nz;
-  }
-  //printf("%d %d %d %d\n", rank, x_off, y_off, z_off);
-  free(ix);
-  free(iy);
-  free(iz);
 
-  // Allocate memory for the grid
-  C.d  = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.mx = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.my = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.mz = (double *) malloc(nz*ny*nx*sizeof(double));
-  C.E  = (double *) malloc(nz*ny*nx*sizeof(double));
-  #ifdef DE
-  C.gE = (double *) malloc(nz*ny*nx*sizeof(double));
-  #endif
-  #ifdef SCALAR
-  C.c = (double *) malloc(nz*ny*nx*sizeof(double));
-  #endif
-
-  // Read in the grid data
-  Read_Grid(filename, C, nx, ny, nz, x_off, y_off, z_off);
-
-  // Create arrays to hold cell values as a function of radius
-  int N_bins = 80;
-  int bin;
-  double bin_width = 0.125;
-
-  double *d_array_hot = (double *)malloc(N_bins*sizeof(double));
-  double *d_array_ion = (double *)malloc(N_bins*sizeof(double));
-  double *d_array_cold = (double *)malloc(N_bins*sizeof(double));
-  double *p_array_hot = (double *)malloc(N_bins*sizeof(double));
-  double *p_array_ion = (double *)malloc(N_bins*sizeof(double));
-  double *p_array_cold = (double *)malloc(N_bins*sizeof(double));
-  double *E_array_hot = (double *)malloc(N_bins*sizeof(double));
-  double *E_array_ion = (double *)malloc(N_bins*sizeof(double));
-  double *E_array_cold = (double *)malloc(N_bins*sizeof(double));
-  double *c_array_hot = (double *)malloc(N_bins*sizeof(double));
-  double *c_array_ion = (double *)malloc(N_bins*sizeof(double));
-  double *c_array_cold = (double *)malloc(N_bins*sizeof(double));
-  double *E_array_th = (double *)malloc(N_bins*sizeof(double));
-  int cell_count_hot[N_bins];
-  int cell_count_ion[N_bins];
-  int cell_count_cold[N_bins];
-  // initialize data for each radial bin
-  for (int bb=0; bb<N_bins; bb++) {
-    d_array_hot[bb] = 0;
-    p_array_hot[bb] = 0;
-    E_array_hot[bb] = 0;
-    c_array_hot[bb] = 0;
-    d_array_ion[bb] = 0;
-    p_array_ion[bb] = 0;
-    E_array_ion[bb] = 0;
-    c_array_ion[bb] = 0;
-    d_array_cold[bb] = 0;
-    p_array_cold[bb] = 0;
-    E_array_cold[bb] = 0;
-    c_array_cold[bb] = 0;
-    E_array_th[bb] = 0;
-    cell_count_hot[bb] = 0;
-    cell_count_ion[bb] = 0;
-    cell_count_cold[bb] = 0;
-  }
-
-  // Loop over cells and assign values to radial bins
-  for (int i=0; i<nx; i++) {
-    for (int j=0; j<ny; j++) {
-      for (int k=0; k<nz; k++) {
-        int id = k + j*nz + i*nz*ny;
-        x_pos = (0.5+i+x_off)*dx - x_len/2.;
-        y_pos = (0.5+j+y_off)*dx - y_len/2.;
-        z_pos = (0.5+k+z_off)*dx - z_len/2.;
-        r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
-        phi = acos(fabs(z_pos)/r);
-        if (phi < cone*3.1416/180.) {
-          double rbin = 8*r;
-          bin = int(rbin);
-          if (bin < N_bins) {
-            d  = C.d[id];
-            n  = d*d_s / (mu*mp);
-            E  = C.E[id];
-            gE = C.gE[id];
-            c  = C.c[id] / d;
-            P  = gE*(gamma-1.0);
-            T  = P*p_s/(n*KB);
-            vx = C.mx[id]/d;
-            vy = C.my[id]/d;
-            vz = C.mz[id]/d;
-            vr = (vx*x_pos + vy*y_pos + vz*z_pos) / r;
-            m_flux = d*vr*dx*dx*dx;
-            c_flux = m_flux*c;
-            p_flux = m_flux*vr;
-            E_flux_kin = m_flux*0.5*vr*vr;
-            E_flux_th = m_flux*(5./2.)*P/d;
-            E_flux = E_flux_kin + E_flux_th;
-            //if (vr > 0.0) {
+    // Loop over cells and assign values to radial bins
+    for (int i=0; i<nx_local; i++) {
+      for (int j=0; j<ny_local; j++) {
+        for (int k=0; k<nz_local; k++) {
+          int id = k + j*nz_local + i*nz_local*ny_local;
+            x_pos = (0.5+i+x_off)*dx - x_len/2.;
+            y_pos = (0.5+j+y_off)*dy - y_len/2.;
+            z_pos = (0.5+k+z_off)*dz - z_len/2.;
+            r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
+            phi = acos(fabs(z_pos)/r);
+          if (phi < cone*3.1416/180.) {
+            double rbin = 8*r;
+            bin = int(rbin);
+            if (bin < N_bins) {
+              d  = C.d[id];
+              n  = d*d_s / (mu*mp);
+              E  = C.E[id];
+              gE = C.gE[id];
+              c  = C.c[id] / d;
+              P  = gE*(gamma-1.0);
+              T  = P*p_s/(n*KB);
+              vx = C.mx[id]/d;
+              vy = C.my[id]/d;
+              vz = C.mz[id]/d;
+              vr = (vx*x_pos + vy*y_pos + vz*z_pos) / r;
+              m_flux = d*vr*dx*dy*dz;
+              c_flux = m_flux*c;
+              p_flux = m_flux*vr;
+              E_flux_kin = m_flux*0.5*vr*vr;
+              E_flux_th = m_flux*(5./2.)*P/d;
+              E_flux = E_flux_kin + E_flux_th;
+              //if (vr > 0.0) {
               if (T < 2e4) {
                 d_array_cold[bin] += m_flux;
                 c_array_cold[bin] += c_flux;
@@ -211,13 +181,11 @@ int main(int argc, char *argv[]) {
                 E_array_th[bin]  += E_flux_th;
                 cell_count_hot[bin]++;
               }
-            //}
+            }
           }
         }
       }
-    }
-  } 
-
+    } 
   // free the grid arrays (now just have info in radial bins)
   free(C.d);
   free(C.mx);
@@ -230,6 +198,7 @@ int main(int argc, char *argv[]) {
   #ifdef SCALAR
   free(C.c);
   #endif
+  }
 
   MPI_Barrier(MPI_COMM_WORLD);
 

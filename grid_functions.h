@@ -21,7 +21,7 @@ typedef struct
 } Conserved;
 
 
-void Read_Header(char *filename, int *nx, int *ny, int *nz, double *xlen, double *ylen, double *zlen);
+void Read_Header(char *filename, int *nx, int *ny, int *nz, int *x_off, int *y_off, int *z_off, int *nx_local, int *ny_local, int *nz_local);
 
-void Read_Grid(char *filename, Conserved C, int nx, int ny, int nz, int x_off, int y_off, int z_off);
+void Read_Grid(char *filename, Conserved C, int nx_local, int ny_local, int nz_local);
 

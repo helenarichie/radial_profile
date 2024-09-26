@@ -106,6 +106,7 @@ int main(int argc, char *argv[]) {
     strcpy(filename, argv[1]);
     char fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
     strncat(filename, &fnum, 4);
+    printf("%s\n", filename)
     Read_Header(filename, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
     dx = x_len / nx_local;
     dy = y_len / ny_local;

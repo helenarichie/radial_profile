@@ -47,6 +47,47 @@ int main(int argc, char *argv[]) {
   double mu = 0.6;
   double gamma = 5./3.;
 
+  // Create arrays to hold cell values as a function of radius
+  int N_bins = 80;
+  int bin;
+  double bin_width = 0.125;
+
+  double *d_array_hot = (double *)malloc(N_bins*sizeof(double));
+  double *d_array_ion = (double *)malloc(N_bins*sizeof(double));
+  double *d_array_cold = (double *)malloc(N_bins*sizeof(double));
+  double *p_array_hot = (double *)malloc(N_bins*sizeof(double));
+  double *p_array_ion = (double *)malloc(N_bins*sizeof(double));
+  double *p_array_cold = (double *)malloc(N_bins*sizeof(double));
+  double *E_array_hot = (double *)malloc(N_bins*sizeof(double));
+  double *E_array_ion = (double *)malloc(N_bins*sizeof(double));
+  double *E_array_cold = (double *)malloc(N_bins*sizeof(double));
+  double *c_array_hot = (double *)malloc(N_bins*sizeof(double));
+  double *c_array_ion = (double *)malloc(N_bins*sizeof(double));
+  double *c_array_cold = (double *)malloc(N_bins*sizeof(double));
+  double *E_array_th = (double *)malloc(N_bins*sizeof(double));
+  int cell_count_hot[N_bins];
+  int cell_count_ion[N_bins];
+  int cell_count_cold[N_bins];
+  // initialize data for each radial bin
+  for (int bb=0; bb<N_bins; bb++) {
+    d_array_hot[bb] = 0;
+    p_array_hot[bb] = 0;
+    E_array_hot[bb] = 0;
+    c_array_hot[bb] = 0;
+    d_array_ion[bb] = 0;
+    p_array_ion[bb] = 0;
+    E_array_ion[bb] = 0;
+    c_array_ion[bb] = 0;
+    d_array_cold[bb] = 0;
+    p_array_cold[bb] = 0;
+    E_array_cold[bb] = 0;
+    c_array_cold[bb] = 0;
+    E_array_th[bb] = 0;
+    cell_count_hot[bb] = 0;
+    cell_count_ion[bb] = 0;
+    cell_count_cold[bb] = 0;
+  }
+
   int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
   int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
 
@@ -85,47 +126,6 @@ int main(int argc, char *argv[]) {
 
     // Read in the grid data
     Read_Grid(filename, C, nx_local, ny_local, nz_local);
-
-    // Create arrays to hold cell values as a function of radius
-    int N_bins = 80;
-    int bin;
-    double bin_width = 0.125;
-
-    double *d_array_hot = (double *)malloc(N_bins*sizeof(double));
-    double *d_array_ion = (double *)malloc(N_bins*sizeof(double));
-    double *d_array_cold = (double *)malloc(N_bins*sizeof(double));
-    double *p_array_hot = (double *)malloc(N_bins*sizeof(double));
-    double *p_array_ion = (double *)malloc(N_bins*sizeof(double));
-    double *p_array_cold = (double *)malloc(N_bins*sizeof(double));
-    double *E_array_hot = (double *)malloc(N_bins*sizeof(double));
-    double *E_array_ion = (double *)malloc(N_bins*sizeof(double));
-    double *E_array_cold = (double *)malloc(N_bins*sizeof(double));
-    double *c_array_hot = (double *)malloc(N_bins*sizeof(double));
-    double *c_array_ion = (double *)malloc(N_bins*sizeof(double));
-    double *c_array_cold = (double *)malloc(N_bins*sizeof(double));
-    double *E_array_th = (double *)malloc(N_bins*sizeof(double));
-    int cell_count_hot[N_bins];
-    int cell_count_ion[N_bins];
-    int cell_count_cold[N_bins];
-    // initialize data for each radial bin
-    for (int bb=0; bb<N_bins; bb++) {
-      d_array_hot[bb] = 0;
-      p_array_hot[bb] = 0;
-      E_array_hot[bb] = 0;
-      c_array_hot[bb] = 0;
-      d_array_ion[bb] = 0;
-      p_array_ion[bb] = 0;
-      E_array_ion[bb] = 0;
-      c_array_ion[bb] = 0;
-      d_array_cold[bb] = 0;
-      p_array_cold[bb] = 0;
-      E_array_cold[bb] = 0;
-      c_array_cold[bb] = 0;
-      E_array_th[bb] = 0;
-      cell_count_hot[bb] = 0;
-      cell_count_ion[bb] = 0;
-      cell_count_cold[bb] = 0;
-    }
 
     // Loop over cells and assign values to radial bins
     for (int i=0; i<nx_local; i++) {

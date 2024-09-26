@@ -59,10 +59,6 @@ void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * di
 }
 
 
-
-
-
-
 int main(int argc, char *argv[]) {
   bool dweighted = true;
   bool mask_hot = true;
@@ -133,6 +129,38 @@ int main(int argc, char *argv[]) {
   double Tcold = 2e4;
   double Thot = 5e5;
 
+  // Create arrays to hold cell values as a function of radius
+  int N_bins = 80;
+  long int r_bins[N_bins];
+  int bin;
+  for (int i=0; i<N_bins; i++) {
+    r_bins[i] = 0;
+  }
+
+  double **r_array = (double **)malloc(N_bins*sizeof(double));
+  double **n_array = (double **)malloc(N_bins*sizeof(double));
+  double **v_array = (double **)malloc(N_bins*sizeof(double));
+  double **T_array = (double **)malloc(N_bins*sizeof(double));
+  double **P_array = (double **)malloc(N_bins*sizeof(double));
+  double **S_array = (double **)malloc(N_bins*sizeof(double));
+  double **c_array = (double **)malloc(N_bins*sizeof(double));
+  double **cs_array = (double **)malloc(N_bins*sizeof(double));
+  double **M_array = (double **)malloc(N_bins*sizeof(double));
+  int cell_count[N_bins];
+  // allocate data for each radial bin
+  for (int bb=0; bb<N_bins; bb++) {
+    r_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    n_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    v_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    T_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    P_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    S_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    c_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    cs_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    M_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
+    cell_count[bb] = 0;
+  }
+
   int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
   int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
 
@@ -146,6 +174,7 @@ int main(int argc, char *argv[]) {
     double cone = 30.;
     double r_av;
     double n_av, n_med, n_lo, n_hi;
+    int x_off, y_off, z_off;
 
     // Read in some header info
     char filename[200];
@@ -173,14 +202,6 @@ int main(int argc, char *argv[]) {
     // Read in the grid data
     Read_Grid(filename, C, nx_local, ny_local, nz_local);
 
-    // Create arrays to hold cell values as a function of radius
-    int N_bins = 80;
-    long int r_bins[N_bins];
-    int bin;
-    for (int i=0; i<N_bins; i++) {
-      r_bins[i] = 0;
-    }
-
     // Loop over cells and count cells in each radial bin
     for (int i=0; i<nx_local; i++) {
       for (int j=0; j<ny_local; j++) {
@@ -205,31 +226,6 @@ int main(int argc, char *argv[]) {
         }
       }
     }
-  }
-
-
-  double **r_array = (double **)malloc(N_bins*sizeof(double));
-  double **n_array = (double **)malloc(N_bins*sizeof(double));
-  double **v_array = (double **)malloc(N_bins*sizeof(double));
-  double **T_array = (double **)malloc(N_bins*sizeof(double));
-  double **P_array = (double **)malloc(N_bins*sizeof(double));
-  double **S_array = (double **)malloc(N_bins*sizeof(double));
-  double **c_array = (double **)malloc(N_bins*sizeof(double));
-  double **cs_array = (double **)malloc(N_bins*sizeof(double));
-  double **M_array = (double **)malloc(N_bins*sizeof(double));
-  int cell_count[N_bins];
-  // allocate data for each radial bin
-  for (int bb=0; bb<N_bins; bb++) {
-    r_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    n_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    v_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    T_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    P_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    S_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    c_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    cs_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    M_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    cell_count[bb] = 0;
   }
 
   // Loop over cells and assign values to radial bins

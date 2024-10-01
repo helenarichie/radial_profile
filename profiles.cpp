@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<stdlib.h>
+#include<vector>
 #include<string.h>
 #include<math.h>
 #include<mpi.h>
@@ -60,11 +61,29 @@ void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * di
 
 
 int main(int argc, char *argv[]) {
+  // some constants
+  double l_s = 3.086e21; // length scale, centimeters in a kiloparsec
+  double m_s = 1.99e33; // mass scale, g in a solar mass
+  double t_s = 3.154e10; // time scale, seconds in a kyr
+  double d_s = m_s / (l_s * l_s * l_s); // density scale, M_sun / kpc^3
+  double v_s = l_s / t_s; // velocity scale, kpc / kyr
+  double p_s = d_s * v_s * v_s; // pressure scale, M_sun / kpc kyr^2
+  double mp = 1.67e-24; // proton mass in grams
+  double KB = 1.3806e-16; // boltzmann constant in cm^2 g / s^2 K
+  double v_to_kmps = l_s / t_s / 100000.;
+  double kmps_to_kpcpkyr = 1.0220122e-6;
+  double m_c = d_s * l_s * l_s * l_s / m_s; // characteristic mass in solar masses
+  double mu = 0.6;
+  double gamma = 5. / 3.;
+
+  double Tcold = 2e4;
+  double Thot = 5e5;
+	
   bool dweighted = true;
   bool mask_hot = true;
-  double x_len = 10.;
-  double y_len = 10.;
-  double z_len = 20.;
+  double x_len = 10.;  // x-dimension of the global simulation volume
+  double y_len = 10.;  // y-dimension
+  double z_len = 20.;  // z-dimension
 
   setbuf(stdout, NULL);
 
@@ -74,7 +93,7 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
-  for (int i=2; i<argc; i++) {
+  for (int i = 2; i < argc; i++) {
     if (strcmp(argv[i],"dweight") == 0) {
       dweighted = true;
     }
@@ -102,203 +121,241 @@ int main(int argc, char *argv[]) {
     den_or_vol = "vol";
   }
 
-  // The # is so that Numpy automatically ignores it if reading it in
-  printf("# Filename: %i Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n",argv[1], hot_or_cold, den_or_vol, x_len, y_len, z_len);
+  int nx, ny, nz;  // the size of the entire simulation grid
+  char filename[200];  // the filename substring
+  { // don't save any variables except nx, ny, nz, and filename in the global function scope
+    int x_off, y_off, z_off, nx_local, ny_local, nz_local;
+    strcpy(filename, argv[1]);
+    int fnum = 0;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
+    char fnum_str[20];
+    sprintf(fnum_str, "%d", fnum);  // convert fnum to a string
+    char filename_i[220];
+    sprintf(filename_i, "%s%s", filename, fnum_str);  // append fnum_str to the filename (i.e. x.h5. + fnum)
+    Read_Header(filename_i, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
+  }
 
+  // The # is so that Numpy automatically ignores it if reading it in
+  printf("# Filename: %s Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n", filename, hot_or_cold, den_or_vol, x_len, y_len, z_len);
   // mpi stuff
   int rank, size;
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-  // some constants
-  double l_s = 3.086e21; // length scale, centimeters in a kiloparsec
-  double m_s = 1.99e33; // mass scale, g in a solar mass
-  double t_s = 3.154e10; // time scale, seconds in a kyr
-  double d_s = m_s / (l_s*l_s*l_s); // density scale, M_sun / kpc^3
-  double v_s = l_s / t_s; // velocity scale, kpc / kyr
-  double p_s = d_s*v_s*v_s; // pressure scale, M_sun / kpc kyr^2
-  double mp = 1.67e-24; // proton mass in grams
-  double KB = 1.3806e-16; // boltzmann constant in cm^2 g / s^2 K
-  double v_to_kmps = l_s/t_s/100000.;
-  double kmps_to_kpcpkyr = 1.0220122e-6;
-  double m_c = d_s*l_s*l_s*l_s / m_s; // characteristic mass in solar masses
-  double mu = 0.6;
-  double gamma = 5./3.;
-
-  double Tcold = 2e4;
-  double Thot = 5e5;
-
-  double r_av;
-  double n_av, n_med, n_lo, n_hi;
-
-  // Create arrays to hold cell values as a function of radius
-  int N_bins = 80;
-  long int r_bins[N_bins];
-  int bin;
-  for (int i=0; i<N_bins; i++) {
-    r_bins[i] = 0;
-  }
-
-  double **r_array = (double **)malloc(N_bins*sizeof(double));
-  double **n_array = (double **)malloc(N_bins*sizeof(double));
-  double **v_array = (double **)malloc(N_bins*sizeof(double));
-  double **T_array = (double **)malloc(N_bins*sizeof(double));
-  double **P_array = (double **)malloc(N_bins*sizeof(double));
-  double **S_array = (double **)malloc(N_bins*sizeof(double));
-  double **c_array = (double **)malloc(N_bins*sizeof(double));
-  double **cs_array = (double **)malloc(N_bins*sizeof(double));
-  double **M_array = (double **)malloc(N_bins*sizeof(double));
-  int cell_count[N_bins];
-  // allocate data for each radial bin
-  for (int bb=0; bb<N_bins; bb++) {
-    r_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    n_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    v_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    T_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    P_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    S_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    c_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    cs_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    M_array[bb] = (double*)malloc(r_bins[bb]*sizeof(double));
-    cell_count[bb] = 0;
-  }
-
   int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
   int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
+  int chunk_volume = nx * ny * nz / size;  // the grid chunk size that each rank is responsible for
+  
+  int N_bins = 8 * 10;  // the number of radial bins, 8 bins for each kpc
+  int N_fields = 8;  // the number of physics variables we want to store in stats_vec
+  #ifdef SCALAR
+  N_fields += 1;
+  #endif
+  #ifdef DUST
+  N_fields += 1;
+  #endif
+
+  // 3D vector of size N_bins x N_fields x 1 initialized with value of 0.0
+  std::vector<std::vector<std::vector<double>>> stats_vec(N_bins, std::vector<std::vector<double>>(N_fields, std::vector<double>(1, 0.0)));
+  
+  // Create arrays to hold cell values as a function of radius
+  long int r_bins[N_bins];
+  int cell_count[N_bins];
+  double m_gas_tot[N_bins];
+  #ifdef DUST
+  double m_dust_0_tot[N_bins];
+  #endif
+
+  // initialize arrays
+  for (int bb = 0; bb < N_bins; bb++) {
+    r_bins[bb] = 0;
+    cell_count[bb] = 0;
+    m_gas_tot[bb] = 0.0;
+    #ifdef DUST
+    m_dust_0_tot[bb] = 0.0;
+    #endif
+  }
+
+  double r_av, n_av, n_med, n_lo, n_hi;
+  int bin;
 
   // each rank reads the files it's responsible for and sums their data into the radial bins
   for (int f_i = 0; f_i < files_per_rank; f_i++) {
     Conserved C;
-    int nx, ny, nz, nx_local, ny_local, nz_local;
-    double d, vx, vy, vz, n, T, P, S, c, cs, M;
+    int x_off, y_off, z_off, nx_local, ny_local, nz_local;
+    double d, vx, vy, vz, n, T, P, S, c, cs, M, d_dust_0;
     double x_pos, y_pos, z_pos, r, vr, phi;
     double dx, dy, dz;
     double cone = 30.;
-    int x_off, y_off, z_off;
 
     // Read in some header info
-    char filename[200];
     strcpy(filename, argv[1]);
     int fnum = rank * files_per_rank + f_i;  // fnum is the GPU ID used to open the raw data file, e.g. x.h5.fnum
     char fnum_str[20];
     sprintf(fnum_str, "%d", fnum);
     char filename_i[220];
     sprintf(filename_i, "%s%s", filename, fnum_str);
-    printf("%s\n", filename_i);
+    printf("rank: %d file: %s\n", rank, filename_i);
     Read_Header(filename_i, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
-    dx = x_len / nx_local;
-    dy = y_len / ny_local;
-    dz = z_len / nz_local;
-
-    // Allocate memory for the grid
-    C.d  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
-    C.mx = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
-    C.my = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
-    C.mz = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
-    C.E  = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    
+    dx = x_len / nx;  // cell x-dimension in kpc
+    dy = y_len / ny;  // cell y-dimension in kpc
+    dz = z_len / nz;  // cell z-dimension in kpc
+    
+    // Allocate memory for the local grid
+    C.d  = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.mx = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.my = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.mz = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.E  = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
     #ifdef DE
-    C.gE = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.gE = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
     #endif
     #ifdef SCALAR
-    C.c = (double *) malloc(nz_local*ny_local*nx_local*sizeof(double));
+    C.c = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    #endif
+    #ifdef DUST
+    C.d_dust_0 = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
     #endif
 
-    // Read in the grid data
+    // Read in the local grid data
     Read_Grid(filename_i, C, nx_local, ny_local, nz_local);
-
-    // Loop over cells and count cells in each radial bin
-    for (int i=0; i<nx_local; i++) {
-      for (int j=0; j<ny_local; j++) {
-        for (int k=0; k<nz_local; k++) {
-        int id = k + j*nz_local + i*nz_local*ny_local;
-        x_pos = (0.5+i+x_off)*dx - x_len/2.;
-        y_pos = (0.5+j+y_off)*dy - y_len/2.;
-        z_pos = (0.5+k+z_off)*dz - z_len/2.;
-        r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
-        double rbin = 8*r;
+    // Loop over the local grid and count how many hot/cool cells are in each radial bin
+    for (int i = 0; i < nx_local; i++) {
+      for (int j = 0; j < ny_local; j++) {
+        for (int k = 0; k < nz_local; k++) {
+        int id = k + j * nz_local + i * nz_local * ny_local;
+        x_pos = (0.5 + i + x_off) * dx - x_len / 2.;
+        y_pos = (0.5 + j + y_off) * dy - y_len / 2.;
+        z_pos = (0.5 + k + z_off) * dz - z_len / 2.;
+        r = sqrt(x_pos * x_pos + y_pos * y_pos + z_pos * z_pos);
+        double rbin = 8 * r;
         bin = int(rbin);
         if (bin < N_bins) {
           phi = acos(fabs(z_pos)/r);
-          if (phi < cone*3.1416/180.) {
-            n  = C.d[id]*d_s / (mu*mp);
-            T  = C.gE[id]*(gamma-1.0)*p_s/(n*KB);
-
+          if (phi < cone * 3.1416 / 180.) {
+            n  = C.d[id] * d_s / (mu * mp);
+            T  = C.gE[id] * (gamma - 1.0) * p_s / (n * KB);
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
-              r_bins[bin]++; // add one to this radial bin count
+              r_bins[bin]++;  // if cell is within the radius, within the cone, and hot/cool, add a cell
             }
           }
         }
       }
+    }
+  }
+
+  for (int bb = 0; bb < N_bins; bb++) {
+    for (int bf = 0; bf < N_fields; bf++) {
+      stats_vec[bb][bf].resize(r_bins[bb]);
     }
   }
 
   // Loop over cells and assign values to radial bins
-  for (int i=0; i<nx_local; i++) {
-    for (int j=0; j<ny_local; j++) {
-      for (int k=0; k<nz_local; k++) {
-        int id = k + j*nz_local + i*nz_local*ny_local;
-        x_pos = (0.5+i+x_off)*dx - x_len/2.;
-        y_pos = (0.5+j+y_off)*dy - y_len/2.;
-        z_pos = (0.5+k+z_off)*dz - z_len/2.;
-        r = sqrt(x_pos*x_pos + y_pos*y_pos + z_pos*z_pos);
-        double rbin = 8*r;
+  for (int i = 0; i < nx_local; i++) {
+    for (int j = 0; j < ny_local; j++) {
+      for (int k = 0; k < nz_local; k++) {
+        int id = k + j * nz_local + i * nz_local * ny_local;
+        x_pos = (0.5 + i + x_off) * dx - x_len / 2.;
+        y_pos = (0.5 + j + y_off) * dy - y_len / 2.;
+        z_pos = (0.5 + k + z_off) * dz - z_len / 2.;
+        r = sqrt(x_pos * x_pos + y_pos * y_pos + z_pos * z_pos);
+	double rbin = 8 * r;
         bin = int(rbin);
         if (bin < N_bins) {
-          phi = acos(fabs(z_pos)/r);
-          if (phi < cone*3.1416/180.) {
+          phi = acos(fabs(z_pos) / r);
+          if (phi < cone * 3.1416 / 180.) {
             d  = C.d[id];
-            n  = d*d_s / (mu*mp);
-            T  = C.gE[id]*(gamma-1.0)*p_s/(n*KB);
+            n  = d * d_s / (mu * mp);
+            T  = C.gE[id] * (gamma - 1.0) * p_s / (n * KB);
 	    #ifdef SCALAR
-            c  = C.c[id]/d;
+            c  = C.c[id] / d;
 	    #endif
-            vx = C.mx[id]/d;
-            vy = C.my[id]/d;
-            vz = C.mz[id]/d;
-            vr = (vx*x_pos + vy*y_pos + vz*z_pos) / r;
-            vr *=v_to_kmps;
-            P  = (C.E[id] - 0.5*d*(vx*vx + vy*vy + vz*vz))*(gamma-1.0);
-            cs = sqrt(gamma*P/d);
-            cs *=v_to_kmps;
+            #ifdef DUST
+	    d_dust_0 = C.d_dust_0[id];
+            #endif
+            vx = C.mx[id] / d;
+            vy = C.my[id] / d;
+            vz = C.mz[id] / d;
+            vr = (vx * x_pos + vy * y_pos + vz * z_pos) / r;
+            vr *= v_to_kmps;
+            P  = (C.E[id] - 0.5 * d * (vx * vx + vy * vy + vz * vz)) * (gamma - 1.0);
+            cs = sqrt(gamma * P / d);
+            cs *= v_to_kmps;
             M  = vr / cs;
-            P  = n*T;
-            d  = d*d_s;
+            P  = n * T;
+            d  = d * d_s;
             S  = P * KB * pow(n, -gamma);
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
+              // sum values for total mass arrays
+              m_gas_tot[bin] += d * dx * dy * dz;
+	      printf("d: %e\n", d);
+	      printf("dx: %e\n", dx);
+              #ifdef DUST
+              m_dust_0_tot[bin] += d_dust_0 * dx * dy * dz;
+              #endif
+	      int cell_index = cell_count[bin];
 	      if (dweighted) {
-		r_array[bin][cell_count[bin]] = r*n;
-		n_array[bin][cell_count[bin]] = n;
-		v_array[bin][cell_count[bin]] = vr*n;
-		T_array[bin][cell_count[bin]] = T*n;
-		P_array[bin][cell_count[bin]] = P*n;
-		S_array[bin][cell_count[bin]] = S*n;
+		// save cell values to sub-grid arrays
+		int field_i = 0;
+		stats_vec[bin][field_i][cell_index] = r * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = vr * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = T * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = P * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = S * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = cs * n;
+		field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = M * n;
+                field_i++;
                 #ifdef SCALAR
-		c_array[bin][cell_count[bin]] = c*n;
+                stats_vec[bin][field_i][cell_count[bin]] = c * n;
+                field_i++;
                 #endif
-		cs_array[bin][cell_count[bin]] = cs*n;
-		M_array[bin][cell_count[bin]] = M*n;
+                #ifdef DUST
+	        stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
+                field_i++;
+                #endif
 	      } else {
-		r_array[bin][cell_count[bin]] = r;
-		n_array[bin][cell_count[bin]] = n;
-		v_array[bin][cell_count[bin]] = vr;
-		T_array[bin][cell_count[bin]] = T;
-		P_array[bin][cell_count[bin]] = P;
-		S_array[bin][cell_count[bin]] = S;
+		// save cell values to sub-grid arrays
+		int field_i = 0;
+                stats_vec[bin][field_i][cell_count[bin]] = r;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = n;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = vr;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = T;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = P;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = S;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = cs;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = M;
+                field_i++;
                 #ifdef SCALAR
-		c_array[bin][cell_count[bin]] = c;
+                stats_vec[bin][field_i][cell_count[bin]] = c;
+                field_i++;
                 #endif
-		cs_array[bin][cell_count[bin]] = cs;
-		M_array[bin][cell_count[bin]] = M;
+                #ifdef DUST
+                stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
+                field_i++;
+                #endif
 	      }
               cell_count[bin]++;
-            }
-          }
+	    }
+	  }
         }
       }
     }
   }
-
   // free the grid arrays (now just have info in radial bins)
   free(C.d);
   free(C.mx);
@@ -311,11 +368,36 @@ int main(int argc, char *argv[]) {
   #ifdef SCALAR
   free(C.c);
   #endif
-
+  #ifdef DUST
+  free(C.d_dust_0);
+  #endif
+  
   MPI_Barrier(MPI_COMM_WORLD);
+}
+
+  double m_gas_tot_recv[N_bins];
+  MPI_Reduce(&m_gas_tot, &m_gas_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+ 
+  #ifdef DUST
+  double m_dust_0_tot_recv[N_bins];
+  MPI_Reduce(&m_dust_0_tot, &m_dust_0_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  #endif
+
+  if (rank == 0) { 
+    printf("# Totals: Radius [kpc], m_gas [M_sun]");
+    #ifdef DUST
+    printf(", m_dust [M_sun]");
+    #endif
+    printf("\n");
+    for (int bb=0; bb<N_bins; bb++) {
+      printf("%f, %e", bb / 8., m_gas_tot_recv[bb]);
+      #ifdef DUST
+      printf(", %e", m_dust_0_tot_recv[bb]);
+      #endif
+      printf("\n");
+    }
   }
-
-
+  /*
   // do analysis for each bin
   for (int bb=0; bb<N_bins; bb++) {
 
@@ -386,22 +468,28 @@ int main(int argc, char *argv[]) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
+  */
 
-
-  for (int bb=0; bb<N_bins; bb++) {
+  /*	  
+  for (int bb = 0; bb < N_bins; bb++) {
     free(r_array[bb]);
     free(n_array[bb]);
     free(v_array[bb]);
     free(T_array[bb]);
     free(P_array[bb]);
     free(S_array[bb]);
-    free(c_array[bb]);
     free(cs_array[bb]);
     free(M_array[bb]);
+    #ifdef SCALAR
+    free(c_array[bb]);
+    #endif
+    #ifdef DUST
+    free(d_dust_0_array[bb]);
+    #endif
   }
-  //free(r_bins);
-  //free(n_av);
+  */
   MPI_Finalize();
+  printf("Profiles complete.\n");
 
   return 0;
 

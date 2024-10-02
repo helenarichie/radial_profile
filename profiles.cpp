@@ -3,52 +3,26 @@
 #include<vector>
 #include<string.h>
 #include<math.h>
+#include<algorithm>
 #include<mpi.h>
 #include<hdf5.h>
 #include<gsl_statistics_double.h>
 #include"grid_functions.h"
 
 
-class OneField
-{
-public:
-  double av;
-  double med;
-  double lo;
-  double hi;
-  bool dweight;
-  void Print(){
-    if (dweight) {
-      printf(" %e %e %e %e", av, med, lo, hi);
-    } else {
-      printf(" %e %e %e %e", av, med, lo, hi);
-    }
-  }
-
-};
-
-
-
-int compare(const void *a, const void *b) {
-  if (*(double*)a > *(double*)b) return 1;
-  else if (*(double*)a < *(double*)b) return -1;
-  else return 0;
-}
-
-
-void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * displs,
+void Reduction(int cell_count_bb, std::vector<double> big_array, int * recvcounts, int * displs,
 	       int bin_count, int rank, bool dweighted, double n_av, std::vector<double> field_array) {
 
-    MPI_Gatherv(field_array.data(), cell_count_bb, MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(field_array.data(), cell_count_bb, MPI_DOUBLE, big_array.data(), recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank != 0) {
       return;
     }
 
-    qsort(big_array, bin_count, sizeof(double), compare);
-    double av = gsl_stats_mean(big_array, 1, bin_count);
-    double med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-    double lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-    double hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
+    std::sort(big_array.begin(), big_array.end());
+    double av = gsl_stats_mean(big_array.data(), 1, bin_count);
+    double med = gsl_stats_median_from_sorted_data(big_array.data(), 1, bin_count);
+    double lo = gsl_stats_quantile_from_sorted_data(big_array.data(), 1, bin_count, 0.25);
+    double hi = gsl_stats_quantile_from_sorted_data(big_array.data(), 1, bin_count, 0.75);
     if (dweighted) {
       if (n_av != 0) {
         av /= n_av;
@@ -141,13 +115,17 @@ int main(int argc, char *argv[]) {
     Read_Header(filename_i, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
   }
 
-  // The # is so that Numpy automatically ignores it if reading it in
-  printf("# Filename: %s Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n", filename, hot_or_cold, den_or_vol, x_len, y_len, z_len);
   // mpi stuff
   int rank, size;
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  if (rank == 0) {
+    // The # is so that Numpy automatically ignores it if reading it in
+    printf("# Filename: %s Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n\n", filename, hot_or_cold, den_or_vol, x_len, y_len, z_len);
+  }
+
   int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
   int files_per_rank = nprocs / size;  // the number of files each MPI rank is resposible for
   int chunk_volume = nx * ny * nz / size;  // the grid chunk size that each rank is responsible for
@@ -199,7 +177,7 @@ int main(int argc, char *argv[]) {
     sprintf(fnum_str, "%d", fnum);
     char filename_i[220];
     sprintf(filename_i, "%s%s", filename, fnum_str);
-    printf("rank: %d file: %s\n", rank, filename_i);
+    printf("Rank %d processing file %s\n", rank, filename_i);
     Read_Header(filename_i, &nx, &ny, &nz, &x_off, &y_off, &z_off, &nx_local, &ny_local, &nz_local);
     
     dx = x_len / nx;  // cell x-dimension in kpc
@@ -359,7 +337,7 @@ int main(int argc, char *argv[]) {
       }
     }
   }
-  // free the grid arrays (now just have info in radial bins)
+  // free the local grid arrays (now just have info in radial bins)
   free(C.d);
   free(C.mx);
   free(C.my);
@@ -387,7 +365,7 @@ int main(int argc, char *argv[]) {
   #endif
 
   if (rank == 0) { 
-    printf("# Totals: Radius [kpc], m_gas [M_sun]");
+    printf("\n# Totals: Radial bin [kpc], m_gas [M_sun]");
     #ifdef DUST
     printf(", m_dust [M_sun]");
     #endif
@@ -402,91 +380,98 @@ int main(int argc, char *argv[]) {
   }
 
   if (rank == 0) {
-    printf("\nStatistics: Radius, Bin cell count, Density [cm^-3], Velocity, Temperature, Pressure, Entropy, Sound speed, Mach number (av med lo hi)\n");
+    printf("\n# Statistics: Radial bin [kpc], Bin cell count, Density [cm^-3], Velocity, Temperature, Pressure, Entropy, Sound speed, Mach number (av med lo hi)\n");
   }
   
   // do analysis for each bin
-  for (int bb=0; bb<N_bins; bb++) {
+  for (int bb = 0; bb < N_bins; bb++) {
     double r_av, n_av, n_med, n_lo, n_hi;
     int bin_count;
     MPI_Reduce(&cell_count[bb], &bin_count, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-    int *recvcounts = NULL;
-    int *displs = NULL;
-    if (rank == 0) recvcounts = (int*)malloc(size*sizeof(int));
-    MPI_Gather(&cell_count[bb], 1, MPI_INT, recvcounts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    std::vector<int> recvcounts(1, 0);
+    std::vector<int> displs(1, 0);
     if (rank == 0) {
-      displs = (int*)malloc(size*sizeof(int));
+      recvcounts.resize(size);
+      displs.resize(size);
+    }
+    MPI_Gather(&cell_count[bb], 1, MPI_INT, recvcounts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
       displs[0] = 0;
-      for (int i=1; i<size; i++) {
+      for (int i = 1; i < size; i++) {
         displs[i] = displs[i-1] + recvcounts[i-1];
       }
     }
-    double *big_array = NULL;
+    
+    // Allocate a single buffer to hold the cell values from each MPI process
+    // The buffer gets re-used for each physical variable 
+    std::vector<double> big_array(1, 0.0);
     if (rank == 0) {
-      big_array = (double*)malloc(bin_count*sizeof(double));
-      if (big_array == NULL) {
-        printf("Error allocating big array.\n");
+      if (bin_count > 0) {
+        big_array.resize(bin_count);
       }
-    }
+    }    
+    
+    // Use MPI_Gatherv to load all cell values of field_i from each MPI process into big_array and do reduction/statstics
     int field_i = 0;
+    
     // radius
-    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      r_av = gsl_stats_mean(big_array, 1, bin_count);
+      std::sort(big_array.begin(), big_array.end());
+      r_av = gsl_stats_mean(big_array.data(), 1, bin_count);
     }
     field_i++;
+
     // density
-    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array.data(), recvcounts.data(), displs.data(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
-      qsort(big_array, bin_count, sizeof(double), compare);
-      n_av = gsl_stats_mean(big_array, 1, bin_count);
-      n_med = gsl_stats_median_from_sorted_data(big_array, 1, bin_count);
-      n_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
-      n_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
-    }
-    if (rank == 0) {
+      std::sort(big_array.begin(), big_array.end());
+      n_av = gsl_stats_mean(big_array.data(), 1, bin_count);
+      n_med = gsl_stats_median_from_sorted_data(big_array.data(), 1, bin_count);
+      n_lo = gsl_stats_quantile_from_sorted_data(big_array.data(), 1, bin_count, 0.25);
+      n_hi = gsl_stats_quantile_from_sorted_data(big_array.data(), 1, bin_count, 0.75);
+
       if (n_av != 0) { 
-        printf("%f, %ld, %e %e %e %e %e", bb/8., bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
+        printf("%f, %d, %e %e %e %e %e", bb/8., bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
       } else {
-        printf("%f, %ld, %e %e %e %e %e", bb/8., bin_count, 0, n_av, n_med, n_lo, n_hi);
+        printf("%f, %d, %e %e %e %e %e", bb/8., bin_count, 0.0, n_av, n_med, n_lo, n_hi);
       }
     }
     field_i++;
     
     // velocity
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     // temperature
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     // pressure
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     // entropy
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     // sound speed
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     // Mach number
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     
     #ifdef SCALAR
     // color
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     #endif
 
     #ifdef DUST
     // dust
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
     #endif
 
@@ -495,16 +480,14 @@ int main(int argc, char *argv[]) {
       printf("\n");
     }
 
-    if (rank == 0) {
-      free(big_array);
-      free(recvcounts);
-      free(displs);
-    }
     MPI_Barrier(MPI_COMM_WORLD);
+  }
+  
+  if (rank == 0) {
+    printf("\nProfiles complete.\n");
   }
 
   MPI_Finalize();
-  printf("Profiles complete.\n");
 
   return 0;
 

@@ -8,13 +8,11 @@
 
 
 void Read_Header(char *filename, int *nx, int *ny, int *nz, int *x_off, int *y_off, int *z_off, int *nx_local, int *ny_local, int *nz_local) {
-
   hid_t file_id, attribute_id;
   herr_t status;
   int dims[3];
   int dims_local[3];
-  double offsets[3];
-  
+  int offsets[3];
   //open the file
   file_id = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
   if (file_id < 0) {
@@ -30,7 +28,6 @@ void Read_Header(char *filename, int *nx, int *ny, int *nz, int *x_off, int *y_o
   *nx = dims[0];
   *ny = dims[1];
   *nz = dims[2];
-
   attribute_id = H5Aopen(file_id, "dims_local", H5P_DEFAULT); 
   status = H5Aread(attribute_id, H5T_NATIVE_INT, &dims_local);
   status = H5Aclose(attribute_id);
@@ -47,16 +44,11 @@ void Read_Header(char *filename, int *nx, int *ny, int *nz, int *x_off, int *y_o
   *y_off = offsets[1];
   *z_off = offsets[2];
 
-  /*
-  attribute_id = H5Aopen(file_id, "domain", H5P_DEFAULT); 
-  status = H5Aread(attribute_id, H5T_NATIVE_DOUBLE, &domain);
-
-  *xlen = domain[0];
-  *ylen = domain[1];
-  *zlen = domain[2]; 
-  */
-
-  status = H5Aclose(attribute_id); 
+  status = H5Fclose(file_id);
+  if (status < 0) {
+    printf("Unable to close file.\n");
+    exit(0);
+  } 
 }
 
 void Read_Grid(char *filename, Conserved C, int nx_local, int ny_local, int nz_local) {
@@ -70,16 +62,12 @@ void Read_Grid(char *filename, Conserved C, int nx_local, int ny_local, int nz_l
   dimsm[2] = nz_local;
   memspace_id = H5Screate_simple(3, dimsm, NULL);
 
-
   //open the file
   file_id = H5Fopen(filename, H5F_ACC_RDONLY, H5P_DEFAULT);
   if (file_id < 0) {
     printf("Unable to open input file.\n");
     exit(0);
   }
-
-
-
   // Open the density dataset
   dataset_id = H5Dopen(file_id, "/density", H5P_DEFAULT);
   // Select the requested subset of data
@@ -132,23 +120,24 @@ void Read_Grid(char *filename, Conserved C, int nx_local, int ny_local, int nz_l
   status = H5Dclose(dataset_id);
   #endif
 
-  #ifdef SCALAR
-  // Open the Color dataset
-  dataset_id = H5Dopen(file_id, "/scalar0", H5P_DEFAULT);
+  #ifdef DUST
+  // Open the internal Energy dataset
+  dataset_id = H5Dopen(file_id, "/dust_density_0", H5P_DEFAULT);
   dataspace_id = H5Dget_space(dataset_id);
   // status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
-  status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.c);
+  status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.d_dust_0);
   status = H5Sclose(dataspace_id);
   status = H5Dclose(dataset_id);
   #endif
-
 
   // free the memory space id
   status = H5Sclose(memspace_id);
   // close the file
   status = H5Fclose(file_id);
-
-
+  if (status < 0) {
+    printf("Unable to close file.\n");
+    exit(0);
+  }
 }
 
 

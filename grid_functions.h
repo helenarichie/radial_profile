@@ -2,7 +2,7 @@
 #include<stdlib.h>
 
 #define DE
-#define SCALAR
+// #define DUST
 
 typedef struct 
 {
@@ -17,7 +17,9 @@ typedef struct
   #ifdef SCALAR
   double *c;
   #endif
-
+  #ifdef DUST
+  double *d_dust_0;
+  #endif
 } Conserved;
 
 

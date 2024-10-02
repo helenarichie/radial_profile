@@ -19,9 +19,9 @@ public:
   bool dweight;
   void Print(){
     if (dweight) {
-      printf(" %e %e %e %e",av, med, lo, hi);
+      printf(" %e %e %e %e", av, med, lo, hi);
     } else {
-      printf(" %e %e %e %e",av, med, lo, hi);
+      printf(" %e %e %e %e", av, med, lo, hi);
     }
   }
 
@@ -37,9 +37,9 @@ int compare(const void *a, const void *b) {
 
 
 void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * displs,
-	       int bin_count, int rank, bool dweighted, double n_av, double * field_array) {
-    // velocity
-    MPI_Gatherv(field_array, cell_count_bb, MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	       int bin_count, int rank, bool dweighted, double n_av, std::vector<double> field_array) {
+
+    MPI_Gatherv(field_array.data(), cell_count_bb, MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank != 0) {
       return;
     }
@@ -50,12 +50,19 @@ void Reduction(int cell_count_bb, double * big_array, int * recvcounts, int * di
     double lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
     double hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
     if (dweighted) {
-      av /= n_av;
-      med /= n_av;
-      lo /= n_av;
-      hi /= n_av;
+      if (n_av != 0) {
+        av /= n_av;
+        med /= n_av;
+        lo /= n_av;
+        hi /= n_av;
+      } else {
+        av = 0;
+        med = 0;
+	lo = 0;
+	hi = 0;
+      }
     }
-    printf(" %e %e %e %e",av,med,lo,hi);
+    printf(", %e %e %e %e", av, med, lo, hi);
     return;
 }
 
@@ -175,12 +182,10 @@ int main(int argc, char *argv[]) {
     #endif
   }
 
-  double r_av, n_av, n_med, n_lo, n_hi;
-  int bin;
-
   // each rank reads the files it's responsible for and sums their data into the radial bins
   for (int f_i = 0; f_i < files_per_rank; f_i++) {
     Conserved C;
+    int bin;
     int x_off, y_off, z_off, nx_local, ny_local, nz_local;
     double d, vx, vy, vz, n, T, P, S, c, cs, M, d_dust_0;
     double x_pos, y_pos, z_pos, r, vr, phi;
@@ -288,8 +293,6 @@ int main(int argc, char *argv[]) {
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
               // sum values for total mass arrays
               m_gas_tot[bin] += d * dx * dy * dz;
-	      printf("d: %e\n", d);
-	      printf("dx: %e\n", dx);
               #ifdef DUST
               m_dust_0_tot[bin] += d_dust_0 * dx * dy * dz;
               #endif
@@ -397,10 +400,14 @@ int main(int argc, char *argv[]) {
       printf("\n");
     }
   }
-  /*
+
+  if (rank == 0) {
+    printf("\nStatistics: Radius, Bin cell count, Density [cm^-3], Velocity, Temperature, Pressure, Entropy, Sound speed, Mach number (av med lo hi)\n");
+  }
+  
   // do analysis for each bin
   for (int bb=0; bb<N_bins; bb++) {
-
+    double r_av, n_av, n_med, n_lo, n_hi;
     int bin_count;
     MPI_Reduce(&cell_count[bb], &bin_count, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
     int *recvcounts = NULL;
@@ -421,14 +428,16 @@ int main(int argc, char *argv[]) {
         printf("Error allocating big array.\n");
       }
     }
+    int field_i = 0;
     // radius
-    MPI_Gatherv(r_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
       qsort(big_array, bin_count, sizeof(double), compare);
       r_av = gsl_stats_mean(big_array, 1, bin_count);
     }
+    field_i++;
     // density
-    MPI_Gatherv(n_array[bb], cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(stats_vec[bb][field_i].data(), cell_count[bb], MPI_DOUBLE, big_array, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (rank == 0) {
       qsort(big_array, bin_count, sizeof(double), compare);
       n_av = gsl_stats_mean(big_array, 1, bin_count);
@@ -436,31 +445,56 @@ int main(int argc, char *argv[]) {
       n_lo = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.25);
       n_hi = gsl_stats_quantile_from_sorted_data(big_array, 1, bin_count, 0.75);
     }
-
     if (rank == 0) {
-      printf("%ld %e %e %e %e %e",
-	     bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
+      if (n_av != 0) { 
+        printf("%f, %ld, %e %e %e %e %e", bb/8., bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi);
+      } else {
+        printf("%f, %ld, %e %e %e %e %e", bb/8., bin_count, 0, n_av, n_med, n_lo, n_hi);
+      }
     }
-
+    field_i++;
+    
     // velocity
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, v_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
     // temperature
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, T_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
     // pressure
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, P_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
     // entropy
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, S_array[bb]);
-    // color
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, c_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
     // sound speed
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, cs_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
     // Mach number
-    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, M_array[bb]);
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    
+    #ifdef SCALAR
+    // color
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    #endif
+
+    #ifdef DUST
+    // dust
+    Reduction(cell_count[bb], big_array, recvcounts, displs, bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    #endif
+
+    
     if (rank == 0) {
       printf("\n");
-      //printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av, n_av, n_med, n_lo, n_hi, v_av, v_med, v_lo, v_hi, T_av, T_med, T_lo, T_hi, P_av, P_med, P_lo, P_hi, c_av, c_med, c_lo, c_hi, cs_av, cs_med, cs_lo, cs_hi, S_av, S_med, S_lo, S_hi, M_av, M_med, M_lo, M_hi);
-      //printf("%ld %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", bin_count, r_av/n_av, n_av, n_med, n_lo, n_hi, v_av/n_av, v_med/n_av, v_lo/n_av, v_hi/n_av, T_av/n_av, T_med/n_av, T_lo/n_av, T_hi/n_av, P_av/n_av, P_med/n_av, P_lo/n_av, P_hi/n_av, c_av/n_av, c_med/n_av, c_lo/n_av, c_hi/n_av, cs_av/n_av, cs_med/n_av, cs_lo/n_av, cs_hi/n_av, S_av/n_av, S_med/n_av, S_lo/n_av, S_hi/n_av, M_av/n_av, M_med/n_av, M_lo/n_av, M_hi/n_av);
     }
+
     if (rank == 0) {
       free(big_array);
       free(recvcounts);
@@ -468,26 +502,7 @@ int main(int argc, char *argv[]) {
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
-  */
 
-  /*	  
-  for (int bb = 0; bb < N_bins; bb++) {
-    free(r_array[bb]);
-    free(n_array[bb]);
-    free(v_array[bb]);
-    free(T_array[bb]);
-    free(P_array[bb]);
-    free(S_array[bb]);
-    free(cs_array[bb]);
-    free(M_array[bb]);
-    #ifdef SCALAR
-    free(c_array[bb]);
-    #endif
-    #ifdef DUST
-    free(d_dust_0_array[bb]);
-    #endif
-  }
-  */
   MPI_Finalize();
   printf("Profiles complete.\n");
 

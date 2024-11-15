@@ -2,7 +2,7 @@
 #include<stdlib.h>
 
 #define DE
-// #define DUST
+#define DUST
 
 typedef struct 
 {
@@ -19,6 +19,9 @@ typedef struct
   #endif
   #ifdef DUST
   double *d_dust_0;
+  double *d_dust_1;
+  double *d_dust_2;
+  double *d_dust_3;
   #endif
 } Conserved;
 

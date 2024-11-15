@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
   N_fields += 1;
   #endif
   #ifdef DUST
-  N_fields += 1;
+  N_fields += 4;
   #endif
 
   // 3D vector of size N_bins x N_fields x 1 initialized with value of 0.0
@@ -148,6 +148,9 @@ int main(int argc, char *argv[]) {
   double m_gas_tot[N_bins];
   #ifdef DUST
   double m_dust_0_tot[N_bins];
+  double m_dust_1_tot[N_bins];
+  double m_dust_2_tot[N_bins];
+  double m_dust_3_tot[N_bins];
   #endif
 
   // initialize arrays
@@ -157,6 +160,9 @@ int main(int argc, char *argv[]) {
     m_gas_tot[bb] = 0.0;
     #ifdef DUST
     m_dust_0_tot[bb] = 0.0;
+    m_dust_1_tot[bb] = 0.0;
+    m_dust_2_tot[bb] = 0.0;
+    m_dust_3_tot[bb] = 0.0;
     #endif
   }
 
@@ -165,7 +171,7 @@ int main(int argc, char *argv[]) {
     Conserved C;
     int bin;
     int x_off, y_off, z_off, nx_local, ny_local, nz_local;
-    double d, vx, vy, vz, n, T, P, S, c, cs, M, d_dust_0;
+    double d, vx, vy, vz, n, T, P, S, c, cs, M, d_dust_0, d_dust_1, d_dust_2, d_dust_3;
     double x_pos, y_pos, z_pos, r, vr, phi;
     double dx, dy, dz;
     double cone = 30.;
@@ -198,6 +204,9 @@ int main(int argc, char *argv[]) {
     #endif
     #ifdef DUST
     C.d_dust_0 = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.d_dust_1 = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.d_dust_2 = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
+    C.d_dust_3 = (double *) malloc(nz_local * ny_local * nx_local * sizeof(double));
     #endif
 
     // Read in the local grid data
@@ -230,6 +239,7 @@ int main(int argc, char *argv[]) {
   for (int bb = 0; bb < N_bins; bb++) {
     for (int bf = 0; bf < N_fields; bf++) {
       stats_vec[bb][bf].resize(r_bins[bb]);
+      // printf("r_bins: %d\n", r_bins[bb]);
     }
   }
 
@@ -255,6 +265,9 @@ int main(int argc, char *argv[]) {
 	    #endif
             #ifdef DUST
 	    d_dust_0 = C.d_dust_0[id];
+            d_dust_1 = C.d_dust_1[id];
+	    d_dust_2 = C.d_dust_2[id];
+	    d_dust_3 = C.d_dust_3[id];
             #endif
             vx = C.mx[id] / d;
             vy = C.my[id] / d;
@@ -270,9 +283,12 @@ int main(int argc, char *argv[]) {
             S  = P * KB * pow(n, -gamma);
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
               // sum values for total mass arrays
-              m_gas_tot[bin] += d * dx * dy * dz;
+	      m_gas_tot[bin] += d / d_s * dx * dy * dz;
               #ifdef DUST
               m_dust_0_tot[bin] += d_dust_0 * dx * dy * dz;
+	      m_dust_1_tot[bin] += d_dust_1 * dx * dy * dz;
+	      m_dust_2_tot[bin] += d_dust_2 * dx * dy * dz;
+	      m_dust_3_tot[bin] += d_dust_3 * dx * dy * dz;
               #endif
 	      int cell_index = cell_count[bin];
 	      if (dweighted) {
@@ -301,6 +317,12 @@ int main(int argc, char *argv[]) {
                 #ifdef DUST
 	        stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
                 field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
+                field_i++;
+		stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
+		field_i++;
                 #endif
 	      } else {
 		// save cell values to sub-grid arrays
@@ -328,6 +350,12 @@ int main(int argc, char *argv[]) {
                 #ifdef DUST
                 stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
                 field_i++;
+                stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
+                field_i++;
+                stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
+                field_i++;
+                stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
+                field_i++;
                 #endif
 	      }
               cell_count[bin]++;
@@ -351,6 +379,9 @@ int main(int argc, char *argv[]) {
   #endif
   #ifdef DUST
   free(C.d_dust_0);
+  free(C.d_dust_1);
+  free(C.d_dust_2);
+  free(C.d_dust_3);
   #endif
   
   MPI_Barrier(MPI_COMM_WORLD);
@@ -360,8 +391,11 @@ int main(int argc, char *argv[]) {
   MPI_Reduce(&m_gas_tot, &m_gas_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
  
   #ifdef DUST
-  double m_dust_0_tot_recv[N_bins];
+  double m_dust_0_tot_recv[N_bins], m_dust_1_tot_recv[N_bins], m_dust_2_tot_recv[N_bins], m_dust_3_tot_recv[N_bins];
   MPI_Reduce(&m_dust_0_tot, &m_dust_0_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&m_dust_1_tot, &m_dust_1_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&m_dust_2_tot, &m_dust_2_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&m_dust_3_tot, &m_dust_3_tot_recv, N_bins, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
   #endif
 
   if (rank == 0) { 
@@ -374,6 +408,9 @@ int main(int argc, char *argv[]) {
       printf("%f, %e", bb / 8., m_gas_tot_recv[bb]);
       #ifdef DUST
       printf(", %e", m_dust_0_tot_recv[bb]);
+      printf(", %e", m_dust_1_tot_recv[bb]);
+      printf(", %e", m_dust_2_tot_recv[bb]);
+      printf(", %e", m_dust_3_tot_recv[bb]);
       #endif
       printf("\n");
     }
@@ -473,9 +510,14 @@ int main(int argc, char *argv[]) {
     // dust
     Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
     field_i++;
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
+    Reduction(cell_count[bb], big_array, recvcounts.data(), displs.data(), bin_count, rank, dweighted, n_av, stats_vec[bb][field_i]);
+    field_i++;
     #endif
 
-    
     if (rank == 0) {
       printf("\n");
     }

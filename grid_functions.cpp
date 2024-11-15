@@ -121,13 +121,35 @@ void Read_Grid(char *filename, Conserved C, int nx_local, int ny_local, int nz_l
   #endif
 
   #ifdef DUST
-  // Open the internal Energy dataset
+  // Open the dust density datasets
   dataset_id = H5Dopen(file_id, "/dust_density_0", H5P_DEFAULT);
   dataspace_id = H5Dget_space(dataset_id);
   // status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
   status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.d_dust_0);
   status = H5Sclose(dataspace_id);
   status = H5Dclose(dataset_id);
+
+  dataset_id = H5Dopen(file_id, "/dust_density_1", H5P_DEFAULT);
+  dataspace_id = H5Dget_space(dataset_id);
+  // status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
+  status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.d_dust_1);
+  status = H5Sclose(dataspace_id);
+  status = H5Dclose(dataset_id);
+
+  dataset_id = H5Dopen(file_id, "/dust_density_2", H5P_DEFAULT);
+  dataspace_id = H5Dget_space(dataset_id);
+  // status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
+  status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.d_dust_2);
+  status = H5Sclose(dataspace_id);
+  status = H5Dclose(dataset_id);
+
+  dataset_id = H5Dopen(file_id, "/dust_density_3", H5P_DEFAULT);
+  dataspace_id = H5Dget_space(dataset_id);
+  // status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, stride, count, block);
+  status = H5Dread(dataset_id, H5T_NATIVE_DOUBLE, memspace_id, dataspace_id, H5P_DEFAULT, C.d_dust_3);
+  status = H5Sclose(dataspace_id);
+  status = H5Dclose(dataset_id);
+
   #endif
 
   // free the memory space id

@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
   double x_len = 10.;  // x-dimension of the global simulation volume
   double y_len = 10.;  // y-dimension
   double z_len = 20.;  // z-dimension
+  double cone = 30.;   // cone opening angle
 
   setbuf(stdout, NULL);
 
@@ -123,7 +124,7 @@ int main(int argc, char *argv[]) {
 
   if (rank == 0) {
     // The # is so that Numpy automatically ignores it if reading it in
-    printf("# Filename: %s Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n\n", filename, hot_or_cold, den_or_vol, x_len, y_len, z_len);
+    printf("# Filename: %s Cone: %f Mask: %s Weighting: %s x_len: %e y_len: %e z_len: %e \n\n", filename, cone, hot_or_cold, den_or_vol, x_len, y_len, z_len);
   }
 
   int nprocs = atoi(argv[2]);  // the number of GPUs the simulation was run on
@@ -174,7 +175,6 @@ int main(int argc, char *argv[]) {
     double d, vx, vy, vz, n, T, P, S, c, cs, M, d_dust_0, d_dust_1, d_dust_2, d_dust_3;
     double x_pos, y_pos, z_pos, r, vr, phi;
     double dx, dy, dz;
-    double cone = 30.;
 
     // Read in some header info
     strcpy(filename, argv[1]);
@@ -211,6 +211,7 @@ int main(int argc, char *argv[]) {
 
     // Read in the local grid data
     Read_Grid(filename_i, C, nx_local, ny_local, nz_local);
+
     // Loop over the local grid and count how many hot/cool cells are in each radial bin
     for (int i = 0; i < nx_local; i++) {
       for (int j = 0; j < ny_local; j++) {
@@ -227,7 +228,7 @@ int main(int argc, char *argv[]) {
           if (phi < cone * 3.1416 / 180.) {
             n  = C.d[id] * d_s / (mu * mp);
             T  = C.gE[id] * (gamma - 1.0) * p_s / (n * KB);
-	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
+	          if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
               r_bins[bin]++;  // if cell is within the radius, within the cone, and hot/cool, add a cell
             }
           }
@@ -252,7 +253,7 @@ int main(int argc, char *argv[]) {
         y_pos = (0.5 + j + y_off) * dy - y_len / 2.;
         z_pos = (0.5 + k + z_off) * dz - z_len / 2.;
         r = sqrt(x_pos * x_pos + y_pos * y_pos + z_pos * z_pos);
-	double rbin = 8 * r;
+	      double rbin = 8 * r;
         bin = int(rbin);
         if (bin < N_bins) {
           phi = acos(fabs(z_pos) / r);
@@ -260,14 +261,14 @@ int main(int argc, char *argv[]) {
             d  = C.d[id];
             n  = d * d_s / (mu * mp);
             T  = C.gE[id] * (gamma - 1.0) * p_s / (n * KB);
-	    #ifdef SCALAR
+	          #ifdef SCALAR
             c  = C.c[id] / d;
-	    #endif
+	          #endif
             #ifdef DUST
-	    d_dust_0 = C.d_dust_0[id];
+	          d_dust_0 = C.d_dust_0[id];
             d_dust_1 = C.d_dust_1[id];
-	    d_dust_2 = C.d_dust_2[id];
-	    d_dust_3 = C.d_dust_3[id];
+	          d_dust_2 = C.d_dust_2[id];
+	          d_dust_3 = C.d_dust_3[id];
             #endif
             vx = C.mx[id] / d;
             vy = C.my[id] / d;
@@ -282,83 +283,83 @@ int main(int argc, char *argv[]) {
             d  = d * d_s;
             S  = P * KB * pow(n, -gamma);
 	    if ((mask_hot && (T > Thot)) || (!mask_hot && (T < Tcold))) {
-              // sum values for total mass arrays
+        // sum values for total mass arrays
 	      m_gas_tot[bin] += d / d_s * dx * dy * dz;
-              #ifdef DUST
-              m_dust_0_tot[bin] += d_dust_0 * dx * dy * dz;
+        #ifdef DUST
+        m_dust_0_tot[bin] += d_dust_0 * dx * dy * dz;
 	      m_dust_1_tot[bin] += d_dust_1 * dx * dy * dz;
 	      m_dust_2_tot[bin] += d_dust_2 * dx * dy * dz;
 	      m_dust_3_tot[bin] += d_dust_3 * dx * dy * dz;
-              #endif
+        #endif
 	      int cell_index = cell_count[bin];
 	      if (dweighted) {
-		// save cell values to sub-grid arrays
-		int field_i = 0;
-		stats_vec[bin][field_i][cell_index] = r * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = vr * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = T * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = P * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = S * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = cs * n;
-		field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = M * n;
-                field_i++;
-                #ifdef SCALAR
-                stats_vec[bin][field_i][cell_count[bin]] = c * n;
-                field_i++;
-                #endif
-                #ifdef DUST
-	        stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
-		field_i++;
-                #endif
+          // save cell values to sub-grid arrays
+          int field_i = 0;
+          stats_vec[bin][field_i][cell_index] = r * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = vr * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = T * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = P * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = S * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = cs * n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = M * n;
+          field_i++;
+          #ifdef SCALAR
+          stats_vec[bin][field_i][cell_count[bin]] = c * n;
+          field_i++;
+          #endif
+          #ifdef DUST
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
+          field_i++;
+          #endif
 	      } else {
-		// save cell values to sub-grid arrays
-		int field_i = 0;
-                stats_vec[bin][field_i][cell_count[bin]] = r;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = n;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = vr;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = T;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = P;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = S;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = cs;
-                field_i++;
-		stats_vec[bin][field_i][cell_count[bin]] = M;
-                field_i++;
-                #ifdef SCALAR
-                stats_vec[bin][field_i][cell_count[bin]] = c;
-                field_i++;
-                #endif
-                #ifdef DUST
-                stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
-                field_i++;
-                stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
-                field_i++;
-                stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
-                field_i++;
-                stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
-                field_i++;
-                #endif
+          // save cell values to sub-grid arrays
+          int field_i = 0;
+          stats_vec[bin][field_i][cell_count[bin]] = r;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = n;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = vr;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = T;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = P;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = S;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = cs;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = M;
+          field_i++;
+          #ifdef SCALAR
+          stats_vec[bin][field_i][cell_count[bin]] = c;
+          field_i++;
+          #endif
+          #ifdef DUST
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_0;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_1;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_2;
+          field_i++;
+          stats_vec[bin][field_i][cell_count[bin]] = d_dust_3;
+          field_i++;
+          #endif
 	      }
-              cell_count[bin]++;
+          cell_count[bin]++;
 	    }
 	  }
         }

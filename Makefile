@@ -1,11 +1,11 @@
 
-EXEC    = profiles
+EXEC    = fluxes
 
 CC      = mpiCC              # sets the C-compiler
 
 OPTIONS = $(OPTIMIZE) $(OPT)
 
-OBJS   = profiles.o grid_functions.o
+OBJS   = grid_functions.o fluxes.o
 
 INCL   = -I./ -I$(OLCF_GSL_ROOT)/include/gsl/
 

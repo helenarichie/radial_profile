@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
   double x_len = 10.;
   double y_len = 10.;
   double z_len = 20.;
-  double cone = 30.;
+  double cone = 75.;
 
   if (rank == 0) {
     // The # is so that Numpy automatically ignores it if reading it in
@@ -246,10 +246,10 @@ int main(int argc, char *argv[]) {
                 c_array_cold[bin] += c_flux;
                 #endif
                 #ifdef DUST
-                dust_0_array_cold[bin] += d_dust_0;
-                dust_1_array_cold[bin] += d_dust_1;
-                dust_2_array_cold[bin] += d_dust_2;
-                dust_3_array_cold[bin] += d_dust_3;
+                dust_0_array_cold[bin] += d_dust_0*vr*dx*dy*dz;
+                dust_1_array_cold[bin] += d_dust_1*vr*dx*dy*dz;
+                dust_2_array_cold[bin] += d_dust_2*vr*dx*dy*dz;
+                dust_3_array_cold[bin] += d_dust_3*vr*dx*dy*dz;
                 #endif             
                 cell_count_cold[bin]++;
               }
@@ -261,10 +261,10 @@ int main(int argc, char *argv[]) {
                 c_array_ion[bin] += c_flux;
                 #endif
                 #ifdef DUST
-                dust_0_array_ion[bin] += d_dust_0;
-                dust_1_array_ion[bin] += d_dust_1;
-                dust_2_array_ion[bin] += d_dust_2;
-                dust_3_array_ion[bin] += d_dust_3;
+                dust_0_array_ion[bin] += d_dust_0*vr*dx*dy*dz;
+                dust_1_array_ion[bin] += d_dust_1*vr*dx*dy*dz;
+                dust_2_array_ion[bin] += d_dust_2*vr*dx*dy*dz;
+                dust_3_array_ion[bin] += d_dust_3*vr*dx*dy*dz;
                 #endif 
                 cell_count_ion[bin]++;
               }
@@ -277,10 +277,10 @@ int main(int argc, char *argv[]) {
                 c_array_hot[bin] += c_flux;
                 #endif
                 #ifdef DUST
-                dust_0_array_hot[bin] += d_dust_0;
-                dust_1_array_hot[bin] += d_dust_1;
-                dust_2_array_hot[bin] += d_dust_2;
-                dust_3_array_hot[bin] += d_dust_3;
+                dust_0_array_hot[bin] += d_dust_0*vr*dx*dy*dz;
+                dust_1_array_hot[bin] += d_dust_1*vr*dx*dy*dz;
+                dust_2_array_hot[bin] += d_dust_2*vr*dx*dy*dz;
+                dust_3_array_hot[bin] += d_dust_3*vr*dx*dy*dz;
                 #endif 
                 cell_count_hot[bin]++;
               }
@@ -372,10 +372,10 @@ int main(int argc, char *argv[]) {
     if (rank == 0) {
       printf("%f, %ld, %e, %e, %e, %ld, %e, %e, %e, %ld, %e, %e, %e", bb/8., bin_count_hot, d_sum_hot/bin_width, p_sum_hot/bin_width, E_sum_hot/bin_width, bin_count_ion, d_sum_ion/bin_width, p_sum_ion/bin_width, E_sum_ion/bin_width, bin_count_cold, d_sum_cold/bin_width, p_sum_cold/bin_width, E_sum_cold/bin_width, E_sum_th/bin_width);
       #ifdef SCALAR
-      printf(", %e, %e, %e", c_sum_hot/bin_width, c_sum_ion/bin_width, c_sum_cold);
+      printf(", %e, %e, %e", c_sum_hot/bin_width, c_sum_ion/bin_width, c_sum_cold/bin_width);
       #endif
       #ifdef DUST
-      printf(", %e, %e, %e, %e, %e, %e, %e, %e, %e, %e, %e, %e,", dust_0_sum_hot/bin_width, dust_0_sum_ion/bin_width, dust_0_sum_cold, dust_1_sum_hot/bin_width, dust_1_sum_ion/bin_width, dust_1_sum_cold, dust_2_sum_hot/bin_width, dust_2_sum_ion/bin_width, dust_2_sum_cold, dust_3_sum_hot/bin_width, dust_3_sum_ion/bin_width, dust_3_sum_cold);
+      printf(", %e, %e, %e, %e, %e, %e, %e, %e, %e, %e, %e, %e,", dust_0_sum_hot/bin_width, dust_0_sum_ion/bin_width, dust_0_sum_cold/bin_width, dust_1_sum_hot/bin_width, dust_1_sum_ion/bin_width, dust_1_sum_cold/bin_width, dust_2_sum_hot/bin_width, dust_2_sum_ion/bin_width, dust_2_sum_cold/bin_width, dust_3_sum_hot/bin_width, dust_3_sum_ion/bin_width, dust_3_sum_cold/bin_width);
       #endif
       printf("\n");
     }
